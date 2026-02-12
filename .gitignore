@@ -1,0 +1,131 @@
+# Visual Studio 2015/2017/2019 user specific files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.sln.DotSettings.user
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+
+# Visual Studio generated files
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Unreal Engine cache and intermediate files
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+Script/
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+*.ipa
+
+# Unreal Engine files
+*.opensdf
+*.opendb
+*.sdf
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# Plugin intermediate and binaries
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# Starter content (optional - uncomment if you don't want to include it)
+# Content/StarterContent/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# Rider IDE
+.idea/
+*.sln.iml
+
+# VSCode
+.vscode/
+
+# User-specific files
+*.user
+*.suo
+
+# Auto-generated project files
+*.sln
+*.xcodeproj
+*.xcworkspace
+*.code-workspace
+
+# Cache files
+FileListAbsolute.txt
+*.tlog
+*.log
+*.ilk
+*.pdb
+*.aps
+*.vspscc
+*.vssscc
+*.bak
+
+# Package files
+*.zip
+*.7z
+*.rar
+
+# Crash reports
+*.dmp
