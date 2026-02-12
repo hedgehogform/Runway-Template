@@ -66,6 +66,10 @@ Runway-Template/
 3. Rebuild the project in Visual Studio
 4. Implement your functionality
 
+### Referencing Neodash Game Classes
+
+Need to reference Neodash's game classes, functions, or structs? Check out the [Runway-CXX-Headers](https://github.com/hedgehogform/Runway-CXX-Headers) repository, which contains dumped C++ headers from Neodash. These headers can help you understand the game's structure and create mods that interact with existing game systems.
+
 ## Troubleshooting
 
 ### Build Errors
@@ -82,5 +86,6 @@ If you encounter build errors:
 ## Related Links
 
 - [Neodash on Steam](https://store.steampowered.com/app/1514950/Neodash/)
+- [Runway-CXX-Headers](https://github.com/hedgehogform/Runway-CXX-Headers) - Dumped C++ headers for Neodash game classes
 - [Unreal Engine 4.26 Documentation](https://docs.unrealengine.com/4.26/)
 - [UE4SS - UHT Compatible Headers Guide](https://docs.ue4ss.com/guides/generating-uht-compatible-headers.html)
