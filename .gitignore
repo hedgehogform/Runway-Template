@@ -1,131 +1,144 @@
-# Visual Studio 2015/2017/2019 user specific files
+#
+# This file tells Git about engine files that never really belong in source control.
+# They are usually build products, log files and intermediate files generated from a compiler or the engine runtime.
+#
+# NOTE:
+#  Paths that start with / match paths relative to the root (where the .gitignore file is)
+#  Paths that end with / will match a folder and all files under it (but not a regular file with no extension)
+#  Use * for wildcards. Wildcards stop at path separators
+#  Use ** for a wildcard that spans path separators
+#  Paths in this file should use forward slash characters, not back slashes
+#  Use \ to escape special characters like ! and #
+#  Use ! to negate a previous pattern. But it doesn't work if the parent sub-folder was masked out already.
+# 
+
+# Ignore all files by default, but scan all directories
+*
+!*/
+
+# C/C++ source files
+!*.c
+!*.cc
+!*.cpp
+!*.cpp.template
+!*.h
+!*.h.template
+!*.hpp
+!*.inl
+!*.inc
+!*.m
+!*.mm
+!*.rc
+!*.rc2
+!*.def
+!*.exp
+!*.manifest
+
+# C# source files
+!*.cs
+!*.cs.template
+!*.aspx
+!*.resx
+
+# Shader formats
+!*.usf
+!*.ush
+!*.hlsl
+!*.glsl
+
+# Text files
+!*.txt
+!*.md
+
+# Script files
+!*.bat
+!*.sh
+!*.pl
+!*.py
+!*.js
+!*.command
+
+# Other configuration and markup files
+!*.ini
+!*.json
+!*.xml
+!*.xaml
+!*.uproject
+!*.uplugin
+!*.html
+!*.html.template
+!*.css
+!*.udn
+!*.config
+!*.version
+!.git*
+
+# Projects and makefiles
+!*.cmake
+!*.mk
+!*.dsp
+!*.dsw
+!*.csproj
+!*.vcproj
+!*.vcxproj
+!*.vcxproj.filters
+!*.sln
+!*.xcodeproj
+!*.xcconfig
+!*.vsprops
+!*.snippet
+!Makefile
+!Makefile.*
+!Settings.settings
+
+# Specific names
+!README
+!AUTHORS
+!LICENSE
+!FAQ
+!VERSION
+!ChangeLog
+
+# Ignore Unix backup files
+*~
+
+# Exceptions
+/.idea
+/*.sln
+/*.xcodeproj
+/Makefile
+/CMakeLists.txt
+*.target.xml
+*.exe.config
+*.exe.manifest
+/.kdev4/
+/UE4CodeCompletionFolders.txt
+/UE4CodeLitePreProcessor.txt
+
+# Add exceptions for binaries needed to run built version
+!/Binaries/Win64/*.dll
+!/Binaries/Win64/*.target
+!/Binaries/Win64/*.modules
+!/Plugins/**/Binaries/Win64/*.dll
+!/Plugins/**/Binaries/Win64/*.target
+!/Plugins/**/Binaries/Win64/*.modules
+*.pdb
+
+# Ignore intermediate folders
+Intermediate/
+obj/
+
+# Ignore any saved local files
+Saved/
+/Engine/Programs/UnrealBuildTool/**
+/LocalBuilds/
+
+# Explicitly ignore Mac DS_Store files, regardless of where they are
+.DS_Store
+
+# Ignore VS user-specific files
 .vs/
 *.suo
 *.user
 *.userosscache
 *.sln.docstates
-*.userprefs
-*.sln.DotSettings.user
-
-# Build results
-[Dd]ebug/
-[Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
-x64/
-x86/
-bld/
-[Bb]in/
-[Oo]bj/
-[Ll]og/
-
-# Visual Studio generated files
-*.sln
-*.vcxproj
-*.vcxproj.filters
-*.vcxproj.user
-
-# Unreal Engine cache and intermediate files
-Binaries/
-Build/
-DerivedDataCache/
-Intermediate/
-Saved/
-Script/
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-*.ipa
-
-# Unreal Engine files
-*.opensdf
-*.opendb
-*.sdf
-*.sln
-*.suo
-*.xcodeproj
-*.xcworkspace
-
-# Plugin intermediate and binaries
-Plugins/*/Binaries/
-Plugins/*/Intermediate/
-
-# Starter content (optional - uncomment if you don't want to include it)
-# Content/StarterContent/
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Linux
-*~
-.directory
-
-# Rider IDE
-.idea/
-*.sln.iml
-
-# VSCode
-.vscode/
-
-# User-specific files
-*.user
-*.suo
-
-# Auto-generated project files
-*.sln
-*.xcodeproj
-*.xcworkspace
-*.code-workspace
-
-# Cache files
-FileListAbsolute.txt
-*.tlog
-*.log
-*.ilk
-*.pdb
-*.aps
-*.vspscc
-*.vssscc
-*.bak
-
-# Package files
-*.zip
-*.7z
-*.rar
-
-# Crash reports
-*.dmp
