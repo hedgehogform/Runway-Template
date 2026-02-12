@@ -19,16 +19,20 @@
 
 #define LOCTEXT_NAMESPACE "AssetGenerator"
 
-UBlueprint* UAnimBlueprintGenerator::CreateNewBlueprint(UPackage* Package, UClass* ParentClass) {
+UBlueprint *UAnimBlueprintGenerator::CreateNewBlueprint(UPackage *Package, UClass *ParentClass)
+{
 	EBlueprintType BlueprintType = BPTYPE_Normal;
 
-	if (ParentClass->HasAnyClassFlags(CLASS_Const)) {
+	if (ParentClass->HasAnyClassFlags(CLASS_Const))
+	{
 		BlueprintType = BPTYPE_Const;
 	}
-	if (ParentClass == UBlueprintFunctionLibrary::StaticClass()) {
+	if (ParentClass == UBlueprintFunctionLibrary::StaticClass())
+	{
 		BlueprintType = BPTYPE_FunctionLibrary;
 	}
-	if (ParentClass == UInterface::StaticClass()) {
+	if (ParentClass == UInterface::StaticClass())
+	{
 		BlueprintType = BPTYPE_Interface;
 	}
 	return FKismetEditorUtilities::CreateBlueprint(ParentClass, Package, GetAssetName(), BlueprintType, UAnimBlueprint::StaticClass(), UAnimBlueprintGeneratedClass::StaticClass());
@@ -37,13 +41,29 @@ UBlueprint* UAnimBlueprintGenerator::CreateNewBlueprint(UPackage* Package, UClas
 void UAnimBlueprintGenerator::PopulateAssetWithData()
 {
 	UpdateDeserializerBlueprintClassObject(false);
-	
-	UAnimBlueprint* Blueprint = GetAsset<UAnimBlueprint>();
-	
+
+	UAnimBlueprint *Blueprint = GetAsset<UAnimBlueprint>();
+
 	const TSharedPtr<FJsonObject> AssetObjectData = GetAssetData()->GetObjectField(TEXT("AssetObjectData"));
 	const int32 TargetSkeletonIndex = AssetObjectData->GetIntegerField(TEXT("TargetSkeleton"));
-	USkeleton* TargetSkeleton = CastChecked<USkeleton>(GetObjectSerializer()->DeserializeObject(TargetSkeletonIndex));
-	if (TargetSkeleton) Blueprint->TargetSkeleton = TargetSkeleton;
+
+	UObject *SkeletonObject = GetObjectSerializer()->DeserializeObject(TargetSkeletonIndex);
+	if (SkeletonObject != nullptr)
+	{
+		USkeleton *TargetSkeleton = Cast<USkeleton>(SkeletonObject);
+		if (TargetSkeleton)
+		{
+			Blueprint->TargetSkeleton = TargetSkeleton;
+		}
+		else
+		{
+			UE_LOG(LogAssetGenerator, Warning, TEXT("Failed to cast skeleton object to USkeleton for AnimBlueprint %s"), *GetPackageName().ToString());
+		}
+	}
+	else
+	{
+		UE_LOG(LogAssetGenerator, Warning, TEXT("Failed to deserialize TargetSkeleton (index %d) for AnimBlueprint %s - skeleton asset may not exist"), TargetSkeletonIndex, *GetPackageName().ToString());
+	}
 
 	/*const TArray<TSharedPtr<FJsonValue>>& ChildProperties = GetAssetData()->GetArrayField(TEXT("ChildProperties"));
 	const TArray<TSharedPtr<FJsonValue>>& Children = GetAssetData()->GetArrayField(TEXT("Children"));
@@ -53,7 +73,7 @@ void UAnimBlueprintGenerator::PopulateAssetWithData()
 	for (const TSharedPtr<FJsonValue>& VariableName : GeneratedVariablesArray) {
 		GeneratedVariableNames.Add(*VariableName->AsString());
 	}
-	
+
 	TArray<FDeserializedProperty> Properties;
 	TMap<FName, FDeserializedFunction> FunctionMap;
 
@@ -100,15 +120,15 @@ void UAnimBlueprintGenerator::PopulateAssetWithData()
 void UBlueprintGenerator::CreateAssetPackage() {
 	const int32 SuperStructIndex = GetAssetData()->GetIntegerField(TEXT("SuperStruct"));
 	UClass* ParentClass = Cast<UClass>(GetObjectSerializer()->DeserializeObject(SuperStructIndex));
-	
+
 	if (ParentClass == NULL) {
 		const FString ObjectName = GetObjectSerializer()->GetObjectFullPath(SuperStructIndex);
-		
+
 		const FText MessageRaw = LOCTEXT("ParentClassNotFoundForBlueprint", "Cannot resolve parent class {ParentClass} for blueprint {Blueprint}");
 		FFormatNamedArguments Arguments;
 		Arguments.Add(TEXT("Blueprint"), FText::FromName(GetPackageName()));
 		Arguments.Add(TEXT("ParentClass"), FText::FromString(*ObjectName));
-		
+
 		if (!FApp::IsUnattended()) {
 			FMessageDialog::Open(EAppMsgType::Ok, FText::Format(MessageRaw, Arguments));
 		}
@@ -117,7 +137,7 @@ void UBlueprintGenerator::CreateAssetPackage() {
 
 	UPackage* NewPackage = CreatePackage(
 #if ENGINE_MINOR_VERSION < 26
-	nullptr, 
+	nullptr,
 #endif
 *GetPackageName().ToString());
 	UBlueprint* NewBlueprint = CreateNewBlueprint(NewPackage, ParentClass);
@@ -125,7 +145,7 @@ void UBlueprintGenerator::CreateAssetPackage() {
 
 	UpdateDeserializerBlueprintClassObject(true);
 	MarkAssetChanged();
-	
+
 	PostConstructOrUpdateAsset(NewBlueprint);
 }
 
@@ -142,11 +162,11 @@ void UBlueprintGenerator::OnExistingPackageLoaded() {
 		FBlueprintGeneratorUtils::EnsureBlueprintUpToDate(Blueprint);
 		Blueprint->ParentClass = ParentClass;
 		FBlueprintGeneratorUtils::EnsureBlueprintUpToDate(Blueprint);
-		
+
 		FBlueprintCompilationManager::CompileSynchronously(FBPCompileRequest(Blueprint, EBlueprintCompileOptions::None, NULL));
 		MarkAssetChanged();
 	}
-	
+
 	PostConstructOrUpdateAsset(Blueprint);
 }*/
 /*
@@ -158,14 +178,19 @@ void UBlueprintGenerator::PostConstructOrUpdateAsset(UBlueprint* Blueprint) {
 		const TSharedPtr<FJsonObject> InterfaceObject = ImplementedInterfaces[i]->AsObject();
 		const int32 ClassObjectIndex = InterfaceObject->GetIntegerField(TEXT("Class"));
 
-		UClass* InterfaceClass = CastChecked<UClass>(GetObjectSerializer()->DeserializeObject(ClassObjectIndex));
-		if (FBlueprintGeneratorUtils::ImplementNewInterface(Blueprint, InterfaceClass)) {
-			MarkAssetChanged();
+		UObject* InterfaceObject_Deser = GetObjectSerializer()->DeserializeObject(ClassObjectIndex);
+		if (InterfaceObject_Deser) {
+			UClass* InterfaceClass = Cast<UClass>(InterfaceObject_Deser);
+			if (InterfaceClass && FBlueprintGeneratorUtils::ImplementNewInterface(Blueprint, InterfaceClass)) {
+				MarkAssetChanged();
+			}
+		} else {
+			UE_LOG(LogAssetGenerator, Warning, TEXT("Failed to deserialize interface class for AnimBlueprint %s"), *GetPackageName().ToString());
 		}
 	}
 
 	EClassFlags ClassFlags = (EClassFlags) FCString::Atoi64(*GetAssetData()->GetStringField(TEXT("ClassFlags")));
-	
+
 	const bool bGenerateConstClass = (ClassFlags & CLASS_Const) != 0;
 	const bool bGenerateAbstractClass = (ClassFlags & CLASS_Abstract) != 0;
 	const bool bDeprecatedClass = (ClassFlags & CLASS_Deprecated) != 0;
@@ -191,10 +216,10 @@ void UBlueprintGenerator::PostConstructOrUpdateAsset(UBlueprint* Blueprint) {
 /*
 void UBlueprintGenerator::FinalizeAssetCDO() {
 	UpdateDeserializerBlueprintClassObject(false);
-	
+
 	UBlueprint* Blueprint = GetAsset<UBlueprint>();
 	USimpleConstructionScript* OldSimpleConstructionScript = Blueprint->SimpleConstructionScript;
-	
+
 	//TEMPFIX: Move SCS to the correct outer if it does not have one already
 	if (OldSimpleConstructionScript != NULL && OldSimpleConstructionScript->GetOuter() != Blueprint->GeneratedClass) {
 		OldSimpleConstructionScript->Rename(NULL, Blueprint->GeneratedClass, REN_DoNothing);
@@ -205,7 +230,7 @@ void UBlueprintGenerator::FinalizeAssetCDO() {
 	const int32 ClassDefaultObjectIndex = GetAssetData()->GetIntegerField(TEXT("ClassDefaultObject"));
 	const bool bCDOChanged = !GetObjectSerializer()->CompareUObjects(
 		ClassDefaultObjectIndex, ClassDefaultObject, false, false);
-	
+
 	if (ClassDefaultObject && bCDOChanged) {
 		GetObjectSerializer()->FlushPropertiesIntoObject(ClassDefaultObjectIndex, ClassDefaultObject, false, false);
 
@@ -216,10 +241,10 @@ void UBlueprintGenerator::FinalizeAssetCDO() {
 	//Flush SimpleConstructionScript changes too
 	const TSharedPtr<FJsonObject> AssetObjectData = GetAssetData()->GetObjectField(TEXT("AssetObjectData"));
 	const int32 SimpleConstructionScriptIndex = AssetObjectData->GetIntegerField(TEXT("SimpleConstructionScript"));
-	
+
 	const bool bScriptObjectChanged = !GetObjectSerializer()->CompareUObjects(
 		SimpleConstructionScriptIndex, OldSimpleConstructionScript, false, false);
-	
+
 	if (bScriptObjectChanged) {
 		//Trash out old SimpleConstructionScript so we can straight up replace it with the new one
 		MoveToTransientPackageAndRename(Blueprint->SimpleConstructionScript);
@@ -227,11 +252,19 @@ void UBlueprintGenerator::FinalizeAssetCDO() {
 		//Deserialize new SCS, update the flags accordingly and assign it to the blueprint
 		//There is no need to duplicate it because it's owner is actually supposed to be the BPGC (for whatever reason)
 		UObject* SimpleConstructionScript = GetObjectSerializer()->DeserializeObject(SimpleConstructionScriptIndex);
-		SimpleConstructionScript->SetFlags(RF_Transactional);
-		Blueprint->SimpleConstructionScript = CastChecked<USimpleConstructionScript>(SimpleConstructionScript);
-		
-		UpdateDeserializerBlueprintClassObject(true);
-		MarkAssetChanged();
+		if (SimpleConstructionScript) {
+			SimpleConstructionScript->SetFlags(RF_Transactional);
+			USimpleConstructionScript* SCS = Cast<USimpleConstructionScript>(SimpleConstructionScript);
+			if (SCS) {
+				Blueprint->SimpleConstructionScript = SCS;
+				UpdateDeserializerBlueprintClassObject(true);
+				MarkAssetChanged();
+			} else {
+				UE_LOG(LogAssetGenerator, Error, TEXT("Failed to cast SimpleConstructionScript for AnimBlueprint %s"), *GetPackageName().ToString());
+			}
+		} else {
+			UE_LOG(LogAssetGenerator, Error, TEXT("Failed to deserialize SimpleConstructionScript for AnimBlueprint %s"), *GetPackageName().ToString());
+		}
 	}
 }
 
@@ -253,7 +286,7 @@ void UBlueprintGenerator::PopulateStageDependencies(TArray<FPackageDependency>& 
 	if (GetCurrentStage() == EAssetGenerationStage::CONSTRUCTION) {
 		//For construction we want parent class to be FULLY generated
 		TArray<FString> ReferencedPackages;
-		
+
 		const int32 SuperStructIndex = GetAssetData()->GetIntegerField(TEXT("SuperStruct"));
 		GetObjectSerializer()->CollectObjectPackages(SuperStructIndex, ReferencedPackages);
 
@@ -270,31 +303,31 @@ void UBlueprintGenerator::PopulateStageDependencies(TArray<FPackageDependency>& 
 			OutDependencies.Add(FPackageDependency{*PackageName, EAssetGenerationStage::CDO_FINALIZATION});
 		}
 	}
-	
+
 	if (GetCurrentStage() == EAssetGenerationStage::DATA_POPULATION) {
 		//For data population we want to have all objects referenced by properties fully constructed
-		
+
 		const TArray<TSharedPtr<FJsonValue>>& ChildProperties = GetAssetData()->GetArrayField(TEXT("ChildProperties"));
 		const TArray<TSharedPtr<FJsonValue>>& Children = GetAssetData()->GetArrayField(TEXT("Children"));
-		
+
 		TArray<FString> AllDependencyNames;
 		for (const TSharedPtr<FJsonValue>& PropertyPtr : ChildProperties) {
 			const TSharedPtr<FJsonObject> PropertyObject = PropertyPtr->AsObject();
 			check(PropertyObject->GetStringField(TEXT("FieldKind")) == TEXT("Property"));
-			
+
 			FAssetGenerationUtil::GetPropertyDependencies(PropertyObject, GetObjectSerializer(), AllDependencyNames);
 		}
 
 		for (int32 i = 0; i < Children.Num(); i++) {
 			const TSharedPtr<FJsonObject> FunctionObject = Children[i]->AsObject();
 			check(FunctionObject->GetStringField(TEXT("FieldKind")) == TEXT("Function"));
-			
+
 			const TArray<TSharedPtr<FJsonValue>> FunctionProperties = FunctionObject->GetArrayField(TEXT("ChildProperties"));
-			
+
 			for (int32 j = 0; j < FunctionProperties.Num(); j++) {
 				const TSharedPtr<FJsonObject> FunctionProperty = FunctionProperties[j]->AsObject();
 				check(FunctionProperty->GetStringField(TEXT("FieldKind")) == TEXT("Property"));
-			
+
 				if (FAssetGenerationUtil::IsFunctionSignatureRelevantProperty(FunctionProperty)) {
 					FAssetGenerationUtil::GetPropertyDependencies(FunctionProperty, GetObjectSerializer(), AllDependencyNames);
 				}
@@ -313,14 +346,15 @@ void UBlueprintGenerator::PopulateStageDependencies(TArray<FPackageDependency>& 
 		TArray<FString> AllDependencyNames;
 		GetObjectSerializer()->CollectObjectPackages(CDOIndex, AllDependencyNames);
 		GetObjectSerializer()->CollectObjectPackages(SCSIndex, AllDependencyNames);
-		
+
 		for (const FString& PackageName : AllDependencyNames) {
-        	OutDependencies.Add(FPackageDependency{*PackageName, EAssetGenerationStage::CONSTRUCTION});
-        }
+			OutDependencies.Add(FPackageDependency{*PackageName, EAssetGenerationStage::CONSTRUCTION});
+		}
 	}
 }*/
 
-FName UAnimBlueprintGenerator::GetAssetClass() {
+FName UAnimBlueprintGenerator::GetAssetClass()
+{
 	return UAnimBlueprint::StaticClass()->GetFName();
 }
 
@@ -366,7 +400,7 @@ void FBlueprintGeneratorUtils::EnsureBlueprintUpToDate(UBlueprint* Blueprint) {
 }
 
 bool FBlueprintGeneratorUtils::ImplementNewInterface(UBlueprint* Blueprint, UClass* InterfaceClass) {
-	
+
 	//Check to make sure we haven't already implemented it
 	for(int32 i = 0; i < Blueprint->ImplementedInterfaces.Num(); i++) {
 		if(Blueprint->ImplementedInterfaces[i].Interface == InterfaceClass) {
@@ -388,7 +422,7 @@ bool FBlueprintGeneratorUtils::ImplementNewInterface(UBlueprint* Blueprint, UCla
 		UFunction* Function = *FunctionIter;
 		const bool bIsAnimFunction = Function->HasMetaData(FBlueprintMetadata::MD_AnimBlueprintFunction) && Blueprint->IsA<UAnimBlueprint>();
 		const bool bShouldImplementAsFunction = UEdGraphSchema_K2::CanKismetOverrideFunction(Function) && !UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(Function);
-		
+
 		if(bShouldImplementAsFunction || bIsAnimFunction) {
 			FName FunctionName = Function->GetFName();
 			UEdGraph* FuncGraph = FindObject<UEdGraph>(Blueprint, *FunctionName.ToString());
@@ -405,11 +439,11 @@ bool FBlueprintGeneratorUtils::ImplementNewInterface(UBlueprint* Blueprint, UCla
 			} else {
 				NewGraph = FBlueprintEditorUtils::CreateNewGraph(Blueprint, FunctionName, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
 			}
-			
+
 			NewGraph->bAllowDeletion = false;
 			NewGraph->InterfaceGuid = FBlueprintEditorUtils::FindInterfaceFunctionGuid(Function, InterfaceClass);
 			NewInterface.Graphs.Add(NewGraph);
-			
+
 			FBlueprintEditorUtils::AddInterfaceGraph(Blueprint, NewGraph, InterfaceClass);
 		}
 	}
@@ -430,9 +464,9 @@ bool FBlueprintGeneratorUtils::CreateParentFunctionCall(UBlueprint* Blueprint, U
 	//Spawn parent function call node and set it's function, plus allocate default pins
 	UEdGraph* TargetGraph = FunctionEntryOrEventNode->GetGraph();
 	const UEdGraphSchema_K2* GraphSchema = CastChecked<UEdGraphSchema_K2>(TargetGraph->GetSchema());
-	
+
 	FGraphNodeCreator<UK2Node_CallParentFunction> FunctionNodeCreator(*TargetGraph);
-	
+
 	UK2Node_CallParentFunction* ParentFunctionNode = FunctionNodeCreator.CreateNode();
 	ParentFunctionNode->SetFromFunction(CallableParentFunction);
 	ParentFunctionNode->AllocateDefaultPins();
@@ -441,7 +475,7 @@ bool FBlueprintGeneratorUtils::CreateParentFunctionCall(UBlueprint* Blueprint, U
 	ParentFunctionNode->NodePosX = FunctionEntryOrEventNode->NodePosX + NewNodeSpawnOffset;
 	ParentFunctionNode->NodePosY = FunctionEntryOrEventNode->NodePosY;
 	FunctionNodeCreator.Finalize();
-	
+
 	//Move function result node to actually match location of newly spawned parent call node
 	if (FunctionReturnNode) {
 		FunctionReturnNode->NodePosX = FunctionEntryOrEventNode->NodePosX + NewNodeSpawnOffset * 2;
@@ -450,7 +484,7 @@ bool FBlueprintGeneratorUtils::CreateParentFunctionCall(UBlueprint* Blueprint, U
 
 	//Connect parent function pins
 	for (UEdGraphPin* ParentPin : ParentFunctionNode->Pins) {
-		
+
 		//Skip all hidden pins we encounter, they will be filled by kismet compiler automatically
 		if (ParentPin->bHidden) {
 			continue;
@@ -458,7 +492,7 @@ bool FBlueprintGeneratorUtils::CreateParentFunctionCall(UBlueprint* Blueprint, U
 
 		//Output pins we always want to connect with the function result node
 		if (ParentPin->Direction == EGPD_Output) {
-		
+
 			//Connect Then pin with the Execute pin of the function result node if we have any
 			if (UEdGraphSchema_K2::IsExecPin(*ParentPin)) {
 				if (FunctionReturnNode) {
@@ -471,7 +505,7 @@ bool FBlueprintGeneratorUtils::CreateParentFunctionCall(UBlueprint* Blueprint, U
 			//Otherwise we should try to find corresponding pin on the function return node
 			if (FunctionReturnNode) {
 				UEdGraphPin* ReturnInputPin = FunctionReturnNode->FindPin(ParentPin->PinName, EGPD_Input);
-				
+
 				if (ReturnInputPin) {
 					ReturnInputPin->BreakAllPinLinks(true);
 					ReturnInputPin->MakeLinkTo(ParentPin);
@@ -484,7 +518,7 @@ bool FBlueprintGeneratorUtils::CreateParentFunctionCall(UBlueprint* Blueprint, U
 			//Connect parent call exec pin with the then pin of the function entry
 			if (UEdGraphSchema_K2::IsExecPin(*ParentPin)) {
 				UEdGraphPin* FunctionEntryThenPin = GraphSchema->FindExecutionPin(*FunctionEntryOrEventNode, EGPD_Output);
-				
+
 				if (FunctionEntryThenPin) {
 					FunctionEntryThenPin->BreakAllPinLinks(true);
 					FunctionEntryThenPin->MakeLinkTo(ParentPin);
@@ -531,7 +565,7 @@ UK2Node_Event* FBlueprintGeneratorUtils::CreateCustomEventNode(UBlueprint* Bluep
 	const FVector2D GoodPlaceForNode = EventGraph->GetGoodPlaceForNewNode();
 	CustomEventNode->NodePosX = GoodPlaceForNode.X;
 	CustomEventNode->NodePosY = GoodPlaceForNode.Y;
-	
+
 	NodeCreator.Finalize();
 	return CustomEventNode;
 }
@@ -540,7 +574,7 @@ UK2Node_FunctionResult* FBlueprintGeneratorUtils::CreateFunctionResultNode(const
 	UEdGraph* Graph = FunctionEntry->GetGraph();
 	const UEdGraphSchema_K2* GraphSchema = CastChecked<UEdGraphSchema_K2>(Graph->GetSchema());
 	FGraphNodeCreator<UK2Node_FunctionResult> NodeCreator(*Graph);
-	
+
 	UK2Node_FunctionResult* ReturnNode = NodeCreator.CreateNode();
 	ReturnNode->FunctionReference = FunctionEntry->FunctionReference;
 	ReturnNode->NodePosX = FunctionEntry->NodePosX + FunctionEntry->NodeWidth + 256;
@@ -566,10 +600,10 @@ UK2Node_FunctionEntry* FBlueprintGeneratorUtils::CreateFunctionGraph(UBlueprint*
 	if (const UEdGraph* ExistingGraph = FindObject<UEdGraph>(Blueprint, *FunctionName.ToString())) {
 		TArray<UK2Node_FunctionEntry*> FunctionEntries;
 		ExistingGraph->GetNodesOfClass(FunctionEntries);
-		
+
 		return FunctionEntries[0];
 	}
-	
+
 	UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(Blueprint, FunctionName, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
 	const UEdGraphSchema_K2* GraphSchema = CastChecked<const UEdGraphSchema_K2>(NewGraph->GetSchema());
 
@@ -583,7 +617,7 @@ UK2Node_FunctionEntry* FBlueprintGeneratorUtils::CreateFunctionGraph(UBlueprint*
 		ExtraFunctionFlags |= FUNC_Static;
 	}
 	GraphSchema->AddExtraFunctionFlags(NewGraph, ExtraFunctionFlags);
-	
+
 	//Mark function entry as editable because it's a custom function and not an override
 	GraphSchema->MarkFunctionEntryAsEditable(NewGraph, true);
 	Blueprint->FunctionGraphs.Add(NewGraph);
@@ -596,29 +630,29 @@ UK2Node_FunctionEntry* FBlueprintGeneratorUtils::CreateFunctionGraph(UBlueprint*
 UK2Node* FBlueprintGeneratorUtils::CreateFunctionOverride(UBlueprint* Blueprint, UFunction* Function, bool bOverrideAsEvent, bool bCreateParentCall) {
 	const FName FunctionName = Function->GetFName();
 	UClass* FunctionOwnerClass = Function->GetOuterUClass()->GetAuthoritativeClass();
-	
+
 	UEdGraph* EventGraph = FBlueprintEditorUtils::FindEventGraph(Blueprint);
-	
+
 	//Attempt to implement function as event if we can, have event graph and it's desired
 	if (UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(Function) && EventGraph && bOverrideAsEvent) {
-	
+
 		//Return existing event node first, in case of us having it already
 		UK2Node_Event* ExistingNode = FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, FunctionOwnerClass, FunctionName);
 
 		//If it's a ghost node, we want to remove the ghost mark and create the parent call if it doesn't have one already
 		if (ExistingNode != NULL && ExistingNode->IsAutomaticallyPlacedGhostNode()) {
 			ResetNodeDisabledState(ExistingNode);
-			
+
 			UEdGraphPin* ExecPin = ExistingNode->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
 			if (ExecPin == NULL) {
 				return ExistingNode;
 			}
-			
+
 			if (ExecPin->HasAnyConnections()) {
 				//If we have connections, we want to determine all of the connected nodes and make sure none of them is marked as disabled
 				for (const UEdGraphPin* ConnectedPin : ExecPin->LinkedTo) {
 					UEdGraphNode* OwningNode = ConnectedPin->GetOwningNode();
-						
+
 					if (OwningNode->IsAutomaticallyPlacedGhostNode()) {
 						ResetNodeDisabledState(OwningNode);
 					}
@@ -635,12 +669,12 @@ UK2Node* FBlueprintGeneratorUtils::CreateFunctionOverride(UBlueprint* Blueprint,
 		if (ExistingNode) {
 			return ExistingNode;
 		}
-		
+
 		UK2Node_Event* Event = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_Event>(EventGraph, EventGraph->GetGoodPlaceForNewNode(), EK2NewNodeFlags::None,
 			[&](UK2Node_Event* NewInstance){
-        	NewInstance->EventReference.SetExternalMember(FunctionName, FunctionOwnerClass);
-        	NewInstance->bOverrideFunction = true;
-        });
+			NewInstance->EventReference.SetExternalMember(FunctionName, FunctionOwnerClass);
+			NewInstance->bOverrideFunction = true;
+		});
 
 		if (bCreateParentCall) {
 			CreateParentFunctionCall(Blueprint, Function, Event, NULL);
@@ -653,17 +687,17 @@ UK2Node* FBlueprintGeneratorUtils::CreateFunctionOverride(UBlueprint* Blueprint,
 	if (const UEdGraph* ExistingGraph = FindObject<UEdGraph>(Blueprint, *FunctionName.ToString())) {
 		TArray<UK2Node_FunctionEntry*> FunctionEntries;
 		ExistingGraph->GetNodesOfClass(FunctionEntries);
-		
+
 		return FunctionEntries[0];
 	}
-		
+
 	//Implement the function graph and spawn default nodes
 	UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(Blueprint, FunctionName, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
 	const UEdGraphSchema_K2* GraphSchema = CastChecked<const UEdGraphSchema_K2>(NewGraph->GetSchema());
-	
+
 	GraphSchema->CreateDefaultNodesForGraph(*NewGraph);
 	GraphSchema->CreateFunctionGraphTerminators(*NewGraph, FunctionOwnerClass);
-	
+
 	Blueprint->FunctionGraphs.Add(NewGraph);
 
 	UK2Node_FunctionEntry* FunctionEntry = NULL;
@@ -708,7 +742,7 @@ UFunction* FBlueprintGeneratorUtils::FindFunctionInParentClassOrInterfaces(UBlue
 
 		const UClass* CurrentClass = ParentClass->GetSuperClass();
 		ResultFunction = ParentClass->FindFunctionByName(FunctionName);
-		
+
 		while (CurrentClass != NULL && ResultFunction != NULL) {
 			if (UFunction* ParentFunction = CurrentClass->FindFunctionByName(FunctionName)) {
 				ResultFunction = ParentFunction;
@@ -746,7 +780,7 @@ bool FBlueprintGeneratorUtils::CreateNewBlueprintFunctions(UBlueprint* Blueprint
 	//Populate a list of existing functions and events in the blueprint
 	TArray<FName> ObsoleteFunctionNames;
 	FunctionAndEventNodes.GetKeys(ObsoleteFunctionNames);
-	
+
 	//Create new functions and make sure signature of existing ones matches
 	for (const FDeserializedFunction& Function : Functions) {
 		ObsoleteFunctionNames.Add(Function.FunctionName);
@@ -770,13 +804,13 @@ bool FBlueprintGeneratorUtils::CreateNewBlueprintFunctions(UBlueprint* Blueprint
 			//We want to create the override even if function exists, but it's actually a ghost node
 			if ((FunctionImplementation == NULL || (*FunctionImplementation)->IsAutomaticallyPlacedGhostNode()) && bCreateFunctionOverrides) {
 				const bool bShouldGenerateAsEvent = Function.bIsCallingIntoUbergraph && UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(OverridenFunction);
-				
+
 				CreateFunctionOverride(Blueprint, OverridenFunction, bShouldGenerateAsEvent, true);
 				bChangedFunctionsOrParameters = true;
 			}
 			continue;
 		}
-		
+
 		//Try to find existing function entry or event first
 		UK2Node_EditablePinBase* FunctionEntryOrEventNode;
 		TArray<UK2Node_FunctionResult*> FunctionResultNodes;
@@ -791,12 +825,12 @@ bool FBlueprintGeneratorUtils::CreateNewBlueprintFunctions(UBlueprint* Blueprint
 			}
 		} else {
 			const bool bShouldImplementAsEvent = Function.bIsCallingIntoUbergraph;
-			
+
 			if (!bShouldImplementAsEvent) {
 				//If we should create new function as an actual function graph, make sure to also create function result node
 				UK2Node_FunctionEntry* FunctionEntry = CreateFunctionGraph(Blueprint, Function.FunctionName);
 				FunctionEntryOrEventNode = FunctionEntry;
-				
+
 				//Create function result node if function has any output parameters
 				if (Function.HasAnyOutputParams()) {
 					UK2Node_FunctionResult* FunctionResult = CreateFunctionResultNode(FunctionEntry, true);
@@ -812,7 +846,7 @@ bool FBlueprintGeneratorUtils::CreateNewBlueprintFunctions(UBlueprint* Blueprint
 		//Make sure we have all flags from the deserialized function
 		if (UK2Node_Event* EventNode = Cast<UK2Node_Event>(FunctionEntryOrEventNode)) {
 			if (EventNode->FunctionFlags != Function.FunctionFlags) {
-				
+
 				EventNode->FunctionFlags = (Function.FunctionFlags & ~FUNC_Native);
 				bChangedFunctionsOrParameters = true;
 			}
@@ -841,7 +875,7 @@ bool FBlueprintGeneratorUtils::CreateNewBlueprintFunctions(UBlueprint* Blueprint
 		//We can remove event nodes as long as they're located inside of the ubergraph
 		if (UK2Node_Event* EventNode = Cast<UK2Node_Event>(ExistingFunctionNode)) {
 			if (Blueprint->UbergraphPages.Contains(NodeGraph)) {
-				
+
 				FBlueprintEditorUtils::RemoveNode(Blueprint, EventNode, true);
 				bChangedFunctionsOrParameters = true;
 				continue;
@@ -851,7 +885,7 @@ bool FBlueprintGeneratorUtils::CreateNewBlueprintFunctions(UBlueprint* Blueprint
 		//For function nodes, we need to remove entire graphs, but make sure they're function graphs beforehand
 		if (Cast<UK2Node_FunctionEntry>(ExistingFunctionNode)) {
 			if (Blueprint->FunctionGraphs.Contains(NodeGraph)) {
-				
+
 				FBlueprintEditorUtils::RemoveGraph(Blueprint, NodeGraph, EGraphRemoveFlags::MarkTransient);
 				bChangedFunctionsOrParameters = true;
 				continue;
@@ -867,7 +901,7 @@ bool FBlueprintGeneratorUtils::CreateNewBlueprintFunctions(UBlueprint* Blueprint
 }
 
 bool FBlueprintGeneratorUtils::CreateBlueprintVariablesForProperties(UBlueprint* Blueprint, const TArray<FDeserializedProperty>& Properties,
-                                                                     const TMap<FName, FDeserializedFunction>& Functions, const TFunctionRef<bool(const FDeserializedProperty& Property)>& PropertyFilter) {
+																	 const TMap<FName, FDeserializedFunction>& Functions, const TFunctionRef<bool(const FDeserializedProperty& Property)>& PropertyFilter) {
 	TSet<FName> ObsoleteBlueprintProperties;
 	bool bChangedProperties = false;
 
@@ -875,7 +909,7 @@ bool FBlueprintGeneratorUtils::CreateBlueprintVariablesForProperties(UBlueprint*
 	for (const FBPVariableDescription& Desc : Blueprint->NewVariables) {
 		ObsoleteBlueprintProperties.Add(Desc.VarName);
 	}
-	
+
 	//Create new variables and update existing ones
 	for (const FDeserializedProperty& Property : Properties) {
 		ObsoleteBlueprintProperties.Remove(Property.PropertyName);
@@ -888,7 +922,7 @@ bool FBlueprintGeneratorUtils::CreateBlueprintVariablesForProperties(UBlueprint*
 		if (PropertyFilter(Property)) {
 			continue;
 		}
-		
+
 		//Try to find existing variable using it's name
 		FBPVariableDescription* VariableDescription = FindBlueprintVariableByName(Blueprint, Property.PropertyName);
 
@@ -899,37 +933,37 @@ bool FBlueprintGeneratorUtils::CreateBlueprintVariablesForProperties(UBlueprint*
 			VariableDescription->VarName = Property.PropertyName;
 			VariableDescription->VarGuid = FGuid::NewGuid();
 			VariableDescription->FriendlyName = Property.PropertyName.ToString();
-			
+
 			VariableDescription->Category = UEdGraphSchema_K2::VR_DefaultCategory;
 			VariableDescription->SetMetaData(TEXT("MultiLine"), TEXT("true"));
 			bChangedProperties = true;
-		} 
+		}
 
 		//Apply data to the variable description
 		if (VariableDescription->VarType != Property.GraphPinType) {
 			VariableDescription->VarType = Property.GraphPinType;
 			bChangedProperties = true;
 		}
-		
+
 		if (VariableDescription->PropertyFlags != (uint64) Property.PropertyFlags) {
 			VariableDescription->PropertyFlags = (uint64) Property.PropertyFlags;
 			bChangedProperties = true;
 		}
-		
+
 		if (VariableDescription->RepNotifyFunc != Property.RepNotifyFunc) {
 			VariableDescription->RepNotifyFunc = Property.RepNotifyFunc;
 			bChangedProperties = true;
 		}
-		
+
 		if (VariableDescription->ReplicationCondition != Property.BlueprintReplicationCondition) {
 			VariableDescription->ReplicationCondition = Property.BlueprintReplicationCondition;
 			bChangedProperties = true;
 		}
-		
+
 		//Make sure multicast delegates actually have valid graphs
 		if (VariableDescription->VarType.PinCategory == UEdGraphSchema_K2::PC_MCDelegate) {
 			UEdGraph* DelegateSignatureGraph = FBlueprintEditorUtils::GetDelegateSignatureGraphByName(Blueprint, VariableDescription->VarName);
-			
+
 			if (DelegateSignatureGraph == NULL) {
 				DelegateSignatureGraph = CreateNewBlueprintEventDispatcherSignatureGraph(Blueprint, VariableDescription->VarName);
 			}
@@ -941,7 +975,7 @@ bool FBlueprintGeneratorUtils::CreateBlueprintVariablesForProperties(UBlueprint*
 
 			const FString DelegateSignatureFunctionName = FString::Printf(TEXT("%s%s"), *VariableDescription->VarName.ToString(), HEADER_GENERATED_DELEGATE_SIGNATURE_SUFFIX);
 			const FDeserializedFunction& DelegateSignature = Functions.FindChecked(*DelegateSignatureFunctionName);
-			
+
 			if (SetFunctionEntryParameters(FunctionEntries[0], DelegateSignature, true)) {
 				bChangedProperties = true;
 			}
@@ -954,7 +988,7 @@ bool FBlueprintGeneratorUtils::CreateBlueprintVariablesForProperties(UBlueprint*
 
 	//Remove delegate signature graphs for obsolete properties
 	TArray<UEdGraph*> ObsoleteDelegateSignatureGraphs;
-	
+
 	for (UEdGraph* DelegateSignatureGraph : Blueprint->DelegateSignatureGraphs) {
 		if (ObsoleteBlueprintProperties.Contains(DelegateSignatureGraph->GetFName())) {
 			ObsoleteDelegateSignatureGraphs.Add(DelegateSignatureGraph);
@@ -963,7 +997,7 @@ bool FBlueprintGeneratorUtils::CreateBlueprintVariablesForProperties(UBlueprint*
 	for (UEdGraph* DelegateSignatureGraph : ObsoleteDelegateSignatureGraphs) {
 		FBlueprintEditorUtils::RemoveGraph(Blueprint, DelegateSignatureGraph, EGraphRemoveFlags::MarkTransient);
 	}
-	
+
 	//Remove obsolete variables descriptors
 	Blueprint->NewVariables.RemoveAll([&](const FBPVariableDescription& Desc){
 		return ObsoleteBlueprintProperties.Contains(Desc.VarName);
@@ -980,10 +1014,10 @@ bool FBlueprintGeneratorUtils::SetFunctionEntryParameters(UK2Node_EditablePinBas
 			ParameterArray.Add(Parameter);
 		}
 	}
-	
+
 	const TArray<TSharedPtr<FUserPinInfo>> OldUserDefinedPins = FunctionEntry->UserDefinedPins;
 	bool bNeedToDeleteExistingPins = false;
-	
+
 	for (int32 i = 0; i < OldUserDefinedPins.Num(); i++) {
 		//Cleanup properties if there are more of them than we expect
 		if (!ParameterArray.IsValidIndex(i)) {
@@ -1007,7 +1041,7 @@ bool FBlueprintGeneratorUtils::SetFunctionEntryParameters(UK2Node_EditablePinBas
 			break;
 		}
 	}
-	
+
 	//Cleanup pins if we need to because they overlap with new ones
 	if (bNeedToDeleteExistingPins) {
 		for (const TSharedPtr<FUserPinInfo>& UserPinInfo : OldUserDefinedPins) {
@@ -1017,13 +1051,13 @@ bool FBlueprintGeneratorUtils::SetFunctionEntryParameters(UK2Node_EditablePinBas
 
 	//Add new pins, but skip over the ones we already have except if we cleaned them up
 	const int32 FirstPinIndex = bNeedToDeleteExistingPins ? 0 : OldUserDefinedPins.Num();
-	
+
 	for (int32 i = FirstPinIndex; i < ParameterArray.Num(); i++) {
 		const FDeserializedProperty& Property = ParameterArray[i];
 
 		//Skip the pin if it represents a compiler-generated world context pin
 		if (Property.PropertyName != TEXT("__WorldContext")) {
-			FunctionEntry->CreateUserDefinedPin(Property.PropertyName, Property.GraphPinType, EGPD_Output);	
+			FunctionEntry->CreateUserDefinedPin(Property.PropertyName, Property.GraphPinType, EGPD_Output);
 		}
 	}
 
@@ -1033,14 +1067,14 @@ bool FBlueprintGeneratorUtils::SetFunctionEntryParameters(UK2Node_EditablePinBas
 
 UEdGraph* FBlueprintGeneratorUtils::CreateNewBlueprintEventDispatcherSignatureGraph(UBlueprint* Blueprint, const FName& DispatcherName) {
 	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
-	
+
 	UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(Blueprint, DispatcherName, UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
 	checkf(NewGraph, TEXT("Failed to create new graph %s for Event Dispatcher in BLueprint %s"), *DispatcherName.ToString(), *Blueprint->GetPathName());
-	
+
 	NewGraph->bEditable = false;
 	K2Schema->CreateDefaultNodesForGraph(*NewGraph);
 	K2Schema->CreateFunctionGraphTerminators(*NewGraph, (UClass*) NULL);
-	
+
 	K2Schema->AddExtraFunctionFlags(NewGraph, FUNC_BlueprintCallable | FUNC_BlueprintEvent | FUNC_Public);
 	K2Schema->MarkFunctionEntryAsEditable(NewGraph, true);
 

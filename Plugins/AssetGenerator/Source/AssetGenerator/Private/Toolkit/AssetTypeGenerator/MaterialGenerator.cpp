@@ -29,97 +29,124 @@
 #include "MediaTexture.h"
 
 static const TArray<FName> ExcludedMaterialDumpProperties = {
-	//We cannot recompile game materials and add usages since we do not have their sources, so we ignore this value and force it to false
+	// We cannot recompile game materials and add usages since we do not have their sources, so we ignore this value and force it to false
 	TEXT("bAutomaticallySetUsageInEditor"),
-	//Decided based on other properties and opacity input expression, recomputed every time properties are changed
+	// Decided based on other properties and opacity input expression, recomputed every time properties are changed
 	TEXT("bCanMaskedBeAssumedOpaque"),
-	//Changed every time material is recompiled in editor, comparing it is pointless
+	// Changed every time material is recompiled in editor, comparing it is pointless
 	TEXT("StateId"),
-	//Compared manually due to some nuances regarding ordering/StateIds of the dependencies
+	// Compared manually due to some nuances regarding ordering/StateIds of the dependencies
 	TEXT("CachedExpressionData"),
-	//Can be rebuild by the editor sometimes during world operations
+	// Can be rebuild by the editor sometimes during world operations
 	TEXT("TextureStreamingData"),
-	//Set by material compiler automatically, cannot be set manually from the editor
-	TEXT("bUsesDistortion")
-};
+	// Set by material compiler automatically, cannot be set manually from the editor
+	TEXT("bUsesDistortion")};
 
-void UMaterialGenerator::PostInitializeAssetGenerator() {
-	UClass* MaterialClass = UMaterial::StaticClass();
-	
-	for (const FName& PropertyName : ExcludedMaterialDumpProperties) {
+void UMaterialGenerator::PostInitializeAssetGenerator()
+{
+	UClass *MaterialClass = UMaterial::StaticClass();
+
+	for (const FName &PropertyName : ExcludedMaterialDumpProperties)
+	{
 		GetPropertySerializer()->DisablePropertySerialization(MaterialClass, PropertyName);
 	}
 }
 
-void UMaterialGenerator::CreateAssetPackage() {
-	UPackage* NewPackage = CreatePackage(
+void UMaterialGenerator::CreateAssetPackage()
+{
+	UPackage *NewPackage = CreatePackage(
 #if ENGINE_MINOR_VERSION < 26
-	nullptr, 
+		nullptr,
 #endif
-*GetPackageName().ToString());
-	UMaterial* Material = NewObject<UMaterial>(NewPackage, GetAssetName(), RF_Public | RF_Standalone);
+		*GetPackageName().ToString());
+	UMaterial *Material = NewObject<UMaterial>(NewPackage, GetAssetName(), RF_Public | RF_Standalone);
 	SetPackageAndAsset(NewPackage, Material);
 
 	CreateGeneratedMaterialComment(Material);
-	
+
 	FMaterialLayoutChangeInfo MaterialLayoutChangeInfo{};
 	PopulateLayoutChangeInfoForNewMaterial(MaterialLayoutChangeInfo);
 	PopulateMaterialWithData(Material, MaterialLayoutChangeInfo);
 }
 
-void UMaterialGenerator::OnExistingPackageLoaded() {
-	UMaterial* ExistingMaterial = GetAsset<UMaterial>();
+void UMaterialGenerator::OnExistingPackageLoaded()
+{
+	UMaterial *ExistingMaterial = GetAsset<UMaterial>();
 
 	FMaterialLayoutChangeInfo LayoutChangeInfo{};
-	if (!IsMaterialUpToDate(ExistingMaterial, LayoutChangeInfo)) {
+	if (!IsMaterialUpToDate(ExistingMaterial, LayoutChangeInfo))
+	{
 		UE_LOG(LogAssetGenerator, Log, TEXT("Refreshing asset data for Material %s"), *ExistingMaterial->GetPathName());
 		PopulateMaterialWithData(ExistingMaterial, LayoutChangeInfo);
 	}
 }
 
-void UMaterialGenerator::PopulateMaterialWithData(UMaterial* Asset, FMaterialLayoutChangeInfo& ChangeInfo) {
+void UMaterialGenerator::PopulateMaterialWithData(UMaterial *Asset, FMaterialLayoutChangeInfo &ChangeInfo)
+{
 	const TSharedPtr<FJsonObject> AssetData = GetAssetData();
+	if (!AssetData.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("PopulateMaterialWithData: AssetData is null"));
+		return;
+	}
+
 	const TSharedPtr<FJsonObject> AssetObjectProperties = AssetData->GetObjectField(TEXT("AssetObjectData"));
-	
-	//Deserialize basic properties into the material, these do not require any fix-ups
+	if (!AssetObjectProperties.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("PopulateMaterialWithData: AssetObjectData is null"));
+		return;
+	}
+
+	// Deserialize basic properties into the material, these do not require any fix-ups
 	GetObjectSerializer()->DeserializeObjectProperties(AssetObjectProperties.ToSharedRef(), Asset);
-	//We cannot recompile game materials and add usages since we do not have their sources, so we ignore this value and force it to false
+	// We cannot recompile game materials and add usages since we do not have their sources, so we ignore this value and force it to false
 	Asset->bAutomaticallySetUsageInEditor = false;
 
-	//Apply layout changes if we are capable of doing it
+	// Apply layout changes if we are capable of doing it
 	TryApplyMaterialLayoutChange(Asset, ChangeInfo);
 }
 
-void UMaterialGenerator::TryApplyMaterialLayoutChange(UMaterial* Material, FMaterialLayoutChangeInfo& LayoutChangeInfo) {
+void UMaterialGenerator::TryApplyMaterialLayoutChange(UMaterial *Material, FMaterialLayoutChangeInfo &LayoutChangeInfo)
+{
 	bool bIsAutoGeneratedMaterialStub = false;
 	bool bForceAutomaticMerge = false;
-	UMaterialExpressionComment* ExistingMaterialChangelistComment = NULL;
+	UMaterialExpressionComment *ExistingMaterialChangelistComment = NULL;
 
-	for (UMaterialExpressionComment* Comment : Material->EditorComments) {
-		if (Comment->Text.Contains("[AUTO GENERATED MATERIAL STUB]")) {
+	for (UMaterialExpressionComment *Comment : Material->EditorComments)
+	{
+		if (Comment->Text.Contains("[AUTO GENERATED MATERIAL STUB]"))
+		{
 			bIsAutoGeneratedMaterialStub = true;
 		}
-		if (Comment->Text.Contains("[CONFIRM AUTOMATIC MERGE]")) {
+		if (Comment->Text.Contains("[CONFIRM AUTOMATIC MERGE]"))
+		{
 			bForceAutomaticMerge = true;
 		}
-		if (Comment->Text.Contains("[MATERIAL CHANGELIST SUMMARY]")) {
+		if (Comment->Text.Contains("[MATERIAL CHANGELIST SUMMARY]"))
+		{
 			ExistingMaterialChangelistComment = Comment;
 		}
 	}
 
 	const bool bCanPerformAutomaticMerge = bIsAutoGeneratedMaterialStub || bForceAutomaticMerge;
-	if (bCanPerformAutomaticMerge) {
+	if (bCanPerformAutomaticMerge)
+	{
 		ApplyLayoutChangelistToMaterial(Material, LayoutChangeInfo, bForceAutomaticMerge);
-		
-		if (ExistingMaterialChangelistComment) {
+
+		if (ExistingMaterialChangelistComment)
+		{
 			RemoveMaterialComment(Material, ExistingMaterialChangelistComment);
 		}
 		MarkAssetChanged();
-	} else {
+	}
+	else
+	{
 		const FString ChangelistCommentText = CreateMaterialChangelistCommentText(LayoutChangeInfo);
-		
-		if (ExistingMaterialChangelistComment == NULL || ExistingMaterialChangelistComment->Text != ChangelistCommentText) {
-			if (ExistingMaterialChangelistComment) {
+
+		if (ExistingMaterialChangelistComment == NULL || ExistingMaterialChangelistComment->Text != ChangelistCommentText)
+		{
+			if (ExistingMaterialChangelistComment)
+			{
 				RemoveMaterialComment(Material, ExistingMaterialChangelistComment);
 			}
 			SpawnCommentWithText(Material, ChangelistCommentText, FVector2D(1000, 0));
@@ -130,82 +157,130 @@ void UMaterialGenerator::TryApplyMaterialLayoutChange(UMaterial* Material, FMate
 
 PRAGMA_DISABLE_OPTIMIZATION
 
-void UMaterialGenerator::ApplyLayoutChangelistToMaterial(UMaterial* Material, FMaterialLayoutChangeInfo& LayoutChangeInfo, bool bSoftMerge) {
+void UMaterialGenerator::ApplyLayoutChangelistToMaterial(UMaterial *Material, FMaterialLayoutChangeInfo &LayoutChangeInfo, bool bSoftMerge)
+{
 	RemoveOutdatedMaterialLayoutNodes(Material, LayoutChangeInfo, bSoftMerge);
-	
+
 	SpawnNewMaterialParameterNodes(Material, LayoutChangeInfo);
 	ApplyMaterialParameterValueChanges(Material, LayoutChangeInfo);
 	ApplyOtherLayoutChanges(Material, LayoutChangeInfo);
 
 	CleanupStubMaterialNodes(Material);
-	if (!bSoftMerge) {
+	if (!bSoftMerge)
+	{
 		TryConnectBasicMaterialPins(Material);
 		ConnectDummyParameterNodes(Material);
 	}
-	
-	//Update cached expression data so next material generator pass will notice layout changes
+
+	// Update cached expression data so next material generator pass will notice layout changes
 	Material->UpdateCachedExpressionData();
-	
-	//Force material re-compilation in the update context
+
+	// Force material re-compilation in the update context
 	ForceMaterialCompilation(Material);
 }
 
-void UMaterialGenerator::PopulateLayoutChangeInfoForNewMaterial(FMaterialLayoutChangeInfo& OutLayoutChangeInfo) const {
+void UMaterialGenerator::PopulateLayoutChangeInfoForNewMaterial(FMaterialLayoutChangeInfo &OutLayoutChangeInfo) const
+{
 	const TSharedPtr<FJsonObject> AssetData = GetAssetData();
+	if (!AssetData.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("PopulateLayoutChangeInfoForNewMaterial: AssetData is null"));
+		return;
+	}
+
 	const TSharedPtr<FJsonObject> AssetObjectProperties = AssetData->GetObjectField(TEXT("AssetObjectData"));
+	if (!AssetObjectProperties.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("PopulateLayoutChangeInfoForNewMaterial: AssetObjectData is null"));
+		return;
+	}
 
 	const TSharedPtr<FJsonObject> CachedExpressionData = AssetObjectProperties->GetObjectField(TEXT("CachedExpressionData"));
+	if (!CachedExpressionData.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("PopulateLayoutChangeInfoForNewMaterial: CachedExpressionData is null"));
+		return;
+	}
 	FMaterialCachedExpressionData NewExpressionData;
 	GetPropertySerializer()->DeserializeStruct(FMaterialCachedExpressionData::StaticStruct(), CachedExpressionData.ToSharedRef(), &NewExpressionData);
-	
+
 	FMaterialLayoutChangeInfo MaterialLayoutChangeInfo{};
-	DetectMaterialExpressionChanges(FMaterialCachedExpressionData{}, NewExpressionData, OutLayoutChangeInfo);
+	// Create a properly initialized empty FMaterialCachedExpressionData for comparison
+	FMaterialCachedExpressionData EmptyExpressionData;
+	FMemory::Memzero(&EmptyExpressionData, sizeof(FMaterialCachedExpressionData));
+	DetectMaterialExpressionChanges(EmptyExpressionData, NewExpressionData, OutLayoutChangeInfo);
 }
 
 PRAGMA_ENABLE_OPTIMIZATION
 
-bool UMaterialGenerator::IsMaterialUpToDate(UMaterial* Asset, FMaterialLayoutChangeInfo& MaterialLayoutChangeInfo) const {
+bool UMaterialGenerator::IsMaterialUpToDate(UMaterial *Asset, FMaterialLayoutChangeInfo &MaterialLayoutChangeInfo) const
+{
 	const TSharedPtr<FJsonObject> AssetData = GetAssetData();
-	const TSharedPtr<FJsonObject> AssetObjectProperties = AssetData->GetObjectField(TEXT("AssetObjectData"));
-
-	//Material is not up-to-date if basic properties do not match with the actual game data
-	if (!GetObjectSerializer()->AreObjectPropertiesUpToDate(AssetObjectProperties.ToSharedRef(), Asset)) {
+	if (!AssetData.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("IsMaterialUpToDate: AssetData is null"));
 		return false;
 	}
 
-	//Compare expression data manually, only textures and MPCs are relevant though
+	const TSharedPtr<FJsonObject> AssetObjectProperties = AssetData->GetObjectField(TEXT("AssetObjectData"));
+	if (!AssetObjectProperties.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("IsMaterialUpToDate: AssetObjectData is null"));
+		return false;
+	}
+
+	// Material is not up-to-date if basic properties do not match with the actual game data
+	if (!GetObjectSerializer()->AreObjectPropertiesUpToDate(AssetObjectProperties.ToSharedRef(), Asset))
+	{
+		return false;
+	}
+
+	// Compare expression data manually, only textures and MPCs are relevant though
 	const TSharedPtr<FJsonObject> CachedExpressionData = AssetObjectProperties->GetObjectField(TEXT("CachedExpressionData"));
+	if (!CachedExpressionData.IsValid())
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("IsMaterialUpToDate: CachedExpressionData is null"));
+		return false;
+	}
 	FMaterialCachedExpressionData NewExpressionData;
 	GetPropertySerializer()->DeserializeStruct(FMaterialCachedExpressionData::StaticStruct(), CachedExpressionData.ToSharedRef(), &NewExpressionData);
 
-	const FMaterialCachedExpressionData& OldExpressionData = Asset->GetCachedExpressionData();
+	const FMaterialCachedExpressionData &OldExpressionData = Asset->GetCachedExpressionData();
 	DetectMaterialExpressionChanges(OldExpressionData, NewExpressionData, MaterialLayoutChangeInfo);
 
-	//Material is up to date if layout change struct is empty
+	// Material is up to date if layout change struct is empty
 	return MaterialLayoutChangeInfo.IsEmpty();
 }
 
-void UMaterialGenerator::PopulateStageDependencies(TArray<FPackageDependency>& OutDependencies) const {
-	if (GetCurrentStage() == EAssetGenerationStage::CONSTRUCTION) {
+void UMaterialGenerator::PopulateStageDependencies(TArray<FPackageDependency> &OutDependencies) const
+{
+	if (GetCurrentStage() == EAssetGenerationStage::CONSTRUCTION)
+	{
 		PopulateReferencedObjectsDependencies(OutDependencies);
 	}
 }
 
-FName UMaterialGenerator::GetAssetClass() {
+FName UMaterialGenerator::GetAssetClass()
+{
 	return UMaterial::StaticClass()->GetFName();
 }
 
-FVector2D UMaterialGenerator::GetGoodPlaceForNewMaterialExpression(UMaterial* Material) {
-	FVector2D BottomLeft(-300,-300);
+FVector2D UMaterialGenerator::GetGoodPlaceForNewMaterialExpression(UMaterial *Material)
+{
+	FVector2D BottomLeft(-300, -300);
 
-	if(Material->Expressions.Num() > 0) {
-		UMaterialExpression* Node = Material->Expressions[0];
-		if (Node) {
+	if (Material->Expressions.Num() > 0)
+	{
+		UMaterialExpression *Node = Material->Expressions[0];
+		if (Node)
+		{
 			BottomLeft = FVector2D(Node->MaterialExpressionEditorX, Node->MaterialExpressionEditorY);
-			
-			for (int32 i = 1; i < Material->Expressions.Num(); i++) {
+
+			for (int32 i = 1; i < Material->Expressions.Num(); i++)
+			{
 				Node = Material->Expressions[i];
-				if (Node) {
+				if (Node)
+				{
 					BottomLeft.X = FMath::Min<float>(BottomLeft.X, Node->MaterialExpressionEditorX);
 					BottomLeft.Y = FMath::Max<float>(BottomLeft.Y, Node->MaterialExpressionEditorY);
 				}
@@ -215,7 +290,8 @@ FVector2D UMaterialGenerator::GetGoodPlaceForNewMaterialExpression(UMaterial* Ma
 	return BottomLeft + FVector2D(0, 256);
 }
 
-void UMaterialGenerator::ForceMaterialCompilation(UMaterial* Material) {
+void UMaterialGenerator::ForceMaterialCompilation(UMaterial *Material)
+{
 	FMaterialUpdateContext MaterialUpdateContext;
 
 	MaterialUpdateContext.AddMaterial(Material);
@@ -225,362 +301,475 @@ void UMaterialGenerator::ForceMaterialCompilation(UMaterial* Material) {
 	Material->PostEditChange();
 }
 
-void UMaterialGenerator::ConnectBasicParameterPinsIfPossible(UMaterial* Material, const FString& ChangelistMessage) {
+void UMaterialGenerator::ConnectBasicParameterPinsIfPossible(UMaterial *Material, const FString &ChangelistMessage)
+{
 	bool bIsAutoGeneratedMaterialStub = false;
-	
-	for (UMaterialExpressionComment* Comment : Material->EditorComments) {
-		if (Comment->Text.Contains("[AUTO GENERATED MATERIAL STUB]")) {
+
+	for (UMaterialExpressionComment *Comment : Material->EditorComments)
+	{
+		if (Comment->Text.Contains("[AUTO GENERATED MATERIAL STUB]"))
+		{
 			bIsAutoGeneratedMaterialStub = true;
 		}
 	}
 
-	if (bIsAutoGeneratedMaterialStub) {
+	if (bIsAutoGeneratedMaterialStub)
+	{
 		CleanupStubMaterialNodes(Material);
 		TryConnectBasicMaterialPins(Material);
 		ConnectDummyParameterNodes(Material);
-		
-	} else {
+	}
+	else
+	{
 		SpawnCommentWithText(Material, ChangelistMessage, FVector2D(1400, 0));
 	}
 }
 
-UClass* GetTextureSampleParameterClassForTexture(UTexture* Texture) {
-	if (Texture->IsA<UTexture2D>() || Texture->IsA<UMediaTexture>()) {
+UClass *GetTextureSampleParameterClassForTexture(UTexture *Texture)
+{
+	if (!Texture)
+	{
+		UE_LOG(LogAssetGenerator, Error, TEXT("GetTextureSampleParameterClassForTexture called with null texture"));
 		return UMaterialExpressionTextureSampleParameter2D::StaticClass();
 	}
-	if (Texture->IsA<UTextureCube>()) {
+
+	if (Texture->IsA<UTexture2D>() || Texture->IsA<UMediaTexture>())
+	{
+		return UMaterialExpressionTextureSampleParameter2D::StaticClass();
+	}
+	if (Texture->IsA<UTextureCube>())
+	{
 		return UMaterialExpressionTextureSampleParameterCube::StaticClass();
 	}
-	if (Texture->IsA(UTexture2DArray::StaticClass())) {
+	if (Texture->IsA(UTexture2DArray::StaticClass()))
+	{
 		return UMaterialExpressionTextureSampleParameter2DArray::StaticClass();
 	}
-	checkf(0, TEXT("Unsupported Texture Class: %s"), *Texture->GetPathName());
-	return NULL;
+
+	UE_LOG(LogAssetGenerator, Error, TEXT("Unsupported Texture Class: %s, defaulting to Texture2D"), *Texture->GetPathName());
+	return UMaterialExpressionTextureSampleParameter2D::StaticClass();
 }
 
-void UMaterialGenerator::ApplyOtherLayoutChanges(UMaterial* Material, FMaterialLayoutChangeInfo& LayoutChangeInfo) {
-	//Add Parameter Collection parameter nodes
-	for (UMaterialParameterCollection* NewCollection : LayoutChangeInfo.NewReferencedParameterCollections) {
+void UMaterialGenerator::ApplyOtherLayoutChanges(UMaterial *Material, FMaterialLayoutChangeInfo &LayoutChangeInfo)
+{
+	// Add Parameter Collection parameter nodes
+	for (UMaterialParameterCollection *NewCollection : LayoutChangeInfo.NewReferencedParameterCollections)
+	{
 
-		for (const FCollectionScalarParameter& Parameter : NewCollection->ScalarParameters) {
-			UMaterialExpressionCollectionParameter* Expression = SpawnMaterialExpression<UMaterialExpressionCollectionParameter>(Material);
-			
+		for (const FCollectionScalarParameter &Parameter : NewCollection->ScalarParameters)
+		{
+			UMaterialExpressionCollectionParameter *Expression = SpawnMaterialExpression<UMaterialExpressionCollectionParameter>(Material);
+
 			Expression->Collection = NewCollection;
 			Expression->ParameterId = Parameter.Id;
 			Expression->ParameterName = Parameter.ParameterName;
 		}
 
-		for (const FCollectionVectorParameter& Parameter : NewCollection->VectorParameters) {
-			UMaterialExpressionCollectionParameter* Expression = SpawnMaterialExpression<UMaterialExpressionCollectionParameter>(Material);
-			
+		for (const FCollectionVectorParameter &Parameter : NewCollection->VectorParameters)
+		{
+			UMaterialExpressionCollectionParameter *Expression = SpawnMaterialExpression<UMaterialExpressionCollectionParameter>(Material);
+
 			Expression->Collection = NewCollection;
 			Expression->ParameterId = Parameter.Id;
 			Expression->ParameterName = Parameter.ParameterName;
 		}
 	}
 
-	UPackage* EngineScriptPackage = UEngine::StaticClass()->GetOuterUPackage();
-	
-	//Add Quality Level, Scene Color and Virtual Texture Output Nodes
-	if (LayoutChangeInfo.bAddedQualityLevelNode) {
+	UPackage *EngineScriptPackage = UEngine::StaticClass()->GetOuterUPackage();
+
+	// Add Quality Level, Scene Color and Virtual Texture Output Nodes
+	if (LayoutChangeInfo.bAddedQualityLevelNode)
+	{
 		SpawnMaterialExpression<UMaterialExpressionQualitySwitch>(Material);
 	}
-	if (LayoutChangeInfo.bAddedSceneColorExpression) {
-		UClass* SceneColorExpressionClass = FindObjectChecked<UClass>(EngineScriptPackage, TEXT("MaterialExpressionSceneColor"));
+	if (LayoutChangeInfo.bAddedSceneColorExpression)
+	{
+		UClass *SceneColorExpressionClass = FindObjectChecked<UClass>(EngineScriptPackage, TEXT("MaterialExpressionSceneColor"));
 		SpawnMaterialExpression<UMaterialExpression>(Material, SceneColorExpressionClass);
 	}
-	if (LayoutChangeInfo.bAddedVirtualTextureOutput) {
-		UClass* VirtualTextureOutputExpressionClass = FindObjectChecked<UClass>(EngineScriptPackage, TEXT("MaterialExpressionRuntimeVirtualTextureOutput"));
+	if (LayoutChangeInfo.bAddedVirtualTextureOutput)
+	{
+		UClass *VirtualTextureOutputExpressionClass = FindObjectChecked<UClass>(EngineScriptPackage, TEXT("MaterialExpressionRuntimeVirtualTextureOutput"));
 		SpawnMaterialExpression<UMaterialExpression>(Material, VirtualTextureOutputExpressionClass);
 	}
 
-	TArray<UTexture*> AlreadyReferencedTextures;
-	UMaterialExpressionLandscapeGrassOutput* LandscapeGrassOutputExpression = NULL;
-	UMaterialExpressionDynamicParameter* DynamicParameterExpression = NULL;
+	TArray<UTexture *> AlreadyReferencedTextures;
+	UMaterialExpressionLandscapeGrassOutput *LandscapeGrassOutputExpression = NULL;
+	UMaterialExpressionDynamicParameter *DynamicParameterExpression = NULL;
 
-	for (UMaterialExpression* Expression : Material->Expressions) {
-		if (Expression->CanReferenceTexture()) {
-			AlreadyReferencedTextures.AddUnique(CastChecked<UTexture>(Expression->GetReferencedTexture()));
+	for (UMaterialExpression *Expression : Material->Expressions)
+	{
+		if (Expression->CanReferenceTexture())
+		{
+			UTexture *ReferencedTexture = Cast<UTexture>(Expression->GetReferencedTexture());
+			if (ReferencedTexture)
+			{
+				AlreadyReferencedTextures.AddUnique(ReferencedTexture);
+			}
 		}
-		if (UMaterialExpressionLandscapeGrassOutput* GrassOutput = Cast<UMaterialExpressionLandscapeGrassOutput>(Expression)) {
+		if (UMaterialExpressionLandscapeGrassOutput *GrassOutput = Cast<UMaterialExpressionLandscapeGrassOutput>(Expression))
+		{
 			LandscapeGrassOutputExpression = GrassOutput;
 		}
-		if (UMaterialExpressionDynamicParameter* DynamicParameter = Cast<UMaterialExpressionDynamicParameter>(Expression)) {
+		if (UMaterialExpressionDynamicParameter *DynamicParameter = Cast<UMaterialExpressionDynamicParameter>(Expression))
+		{
 			DynamicParameterExpression = DynamicParameter;
 		}
 	}
 
-	//Add Landscape Grass Types to the existing node, or make a new one
-	if (LayoutChangeInfo.NewGrassTypes.Num()) {
-		if (LandscapeGrassOutputExpression == NULL) {
+	// Add Landscape Grass Types to the existing node, or make a new one
+	if (LayoutChangeInfo.NewGrassTypes.Num())
+	{
+		if (LandscapeGrassOutputExpression == NULL)
+		{
 			LandscapeGrassOutputExpression = SpawnMaterialExpression<UMaterialExpressionLandscapeGrassOutput>(Material);
 		}
-		for (ULandscapeGrassType* GrassType : LayoutChangeInfo.NewGrassTypes) {
+		for (ULandscapeGrassType *GrassType : LayoutChangeInfo.NewGrassTypes)
+		{
 			FGrassInput NewGrassInput(GrassType->GetFName());
 			NewGrassInput.GrassType = GrassType;
 			LandscapeGrassOutputExpression->GrassTypes.Add(NewGrassInput);
 		}
 	}
 
-	//Add Dynamic Parameters to the existing node, or make a new one
-	if (LayoutChangeInfo.NewDynamicParameters.Num()) {
-		if (DynamicParameterExpression == NULL) {
+	// Add Dynamic Parameters to the existing node, or make a new one
+	if (LayoutChangeInfo.NewDynamicParameters.Num())
+	{
+		if (DynamicParameterExpression == NULL)
+		{
 			DynamicParameterExpression = SpawnMaterialExpression<UMaterialExpressionDynamicParameter>(Material);
 		}
-		for (const FName& ParameterName : LayoutChangeInfo.NewDynamicParameters) {
+		for (const FName &ParameterName : LayoutChangeInfo.NewDynamicParameters)
+		{
 			DynamicParameterExpression->ParamNames.Add(ParameterName.ToString());
 		}
 	}
 
-	//Add Texture Samplers for every Texture object not referenced already
-	for (UTexture* ReferencedTexture : LayoutChangeInfo.NewReferencedTextures) {
-		if (!AlreadyReferencedTextures.Contains(ReferencedTexture)) {
-			UMaterialExpressionTextureSample* TextureSample = SpawnMaterialExpression<UMaterialExpressionTextureSample>(Material);
+	// Add Texture Samplers for every Texture object not referenced already
+	for (UTexture *ReferencedTexture : LayoutChangeInfo.NewReferencedTextures)
+	{
+		if (ReferencedTexture && !AlreadyReferencedTextures.Contains(ReferencedTexture))
+		{
+			UMaterialExpressionTextureSample *TextureSample = SpawnMaterialExpression<UMaterialExpressionTextureSample>(Material);
 			TextureSample->Texture = ReferencedTexture;
 			TextureSample->AutoSetSampleType();
 		}
 	}
 }
 
-void UMaterialGenerator::ApplyMaterialParameterValueChanges(UMaterial* Material, FMaterialLayoutChangeInfo& LayoutChangeInfo) {
-	TMap<FName, UMaterialExpressionScalarParameter*> ScalarParameters;
-	TMap<FName, UMaterialExpressionVectorParameter*> VectorParameters;
-	TMap<FName, UMaterialExpressionTextureSampleParameter*> TextureParameters;
-	TMap<FName, UMaterialExpressionFontSampleParameter*> FontParameters;
-	TMap<FName, UMaterialExpressionRuntimeVirtualTextureSampleParameter*> VirtualTextureParameters;
+void UMaterialGenerator::ApplyMaterialParameterValueChanges(UMaterial *Material, FMaterialLayoutChangeInfo &LayoutChangeInfo)
+{
+	TMap<FName, UMaterialExpressionScalarParameter *> ScalarParameters;
+	TMap<FName, UMaterialExpressionVectorParameter *> VectorParameters;
+	TMap<FName, UMaterialExpressionTextureSampleParameter *> TextureParameters;
+	TMap<FName, UMaterialExpressionFontSampleParameter *> FontParameters;
+	TMap<FName, UMaterialExpressionRuntimeVirtualTextureSampleParameter *> VirtualTextureParameters;
 
-	for (UMaterialExpression* Expression : Material->Expressions) {
-		if (UMaterialExpressionScalarParameter* Parameter = Cast<UMaterialExpressionScalarParameter>(Expression)) {
+	for (UMaterialExpression *Expression : Material->Expressions)
+	{
+		if (UMaterialExpressionScalarParameter *Parameter = Cast<UMaterialExpressionScalarParameter>(Expression))
+		{
 			ScalarParameters.Add(Parameter->ParameterName, Parameter);
 		}
-		if (UMaterialExpressionVectorParameter* Parameter = Cast<UMaterialExpressionVectorParameter>(Expression)) {
+		if (UMaterialExpressionVectorParameter *Parameter = Cast<UMaterialExpressionVectorParameter>(Expression))
+		{
 			VectorParameters.Add(Parameter->ParameterName, Parameter);
 		}
-		if (UMaterialExpressionTextureSampleParameter* Parameter = Cast<UMaterialExpressionTextureSampleParameter>(Expression)) {
+		if (UMaterialExpressionTextureSampleParameter *Parameter = Cast<UMaterialExpressionTextureSampleParameter>(Expression))
+		{
 			TextureParameters.Add(Parameter->ParameterName, Parameter);
 		}
-		if (UMaterialExpressionFontSampleParameter* Parameter = Cast<UMaterialExpressionFontSampleParameter>(Expression)) {
+		if (UMaterialExpressionFontSampleParameter *Parameter = Cast<UMaterialExpressionFontSampleParameter>(Expression))
+		{
 			FontParameters.Add(Parameter->ParameterName, Parameter);
 		}
-		if (UMaterialExpressionRuntimeVirtualTextureSampleParameter* Parameter = Cast<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Expression)) {
+		if (UMaterialExpressionRuntimeVirtualTextureSampleParameter *Parameter = Cast<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Expression))
+		{
 			VirtualTextureParameters.Add(Parameter->ParameterName, Parameter);
 		}
 	}
 
-	for (const TParameterValueChange<float>& ScalarParameter : LayoutChangeInfo.ScalarParameterValueChanges) {
-		UMaterialExpressionScalarParameter* Parameter = ScalarParameters.FindChecked(ScalarParameter.ParameterName);
-		Parameter->DefaultValue = ScalarParameter.NewValue;
+	for (const TParameterValueChange<float> &ScalarParameter : LayoutChangeInfo.ScalarParameterValueChanges)
+	{
+		UMaterialExpressionScalarParameter **ParameterPtr = ScalarParameters.Find(ScalarParameter.ParameterName);
+		if (ParameterPtr && *ParameterPtr)
+		{
+			(*ParameterPtr)->DefaultValue = ScalarParameter.NewValue;
+		}
 	}
 
-	for (const TParameterValueChange<FLinearColor>& VectorParameter : LayoutChangeInfo.VectorParameterValueChanges) {
-		UMaterialExpressionVectorParameter* Parameter = VectorParameters.FindChecked(VectorParameter.ParameterName);
-		Parameter->DefaultValue = VectorParameter.NewValue;
+	for (const TParameterValueChange<FLinearColor> &VectorParameter : LayoutChangeInfo.VectorParameterValueChanges)
+	{
+		UMaterialExpressionVectorParameter **ParameterPtr = VectorParameters.Find(VectorParameter.ParameterName);
+		if (ParameterPtr && *ParameterPtr)
+		{
+			(*ParameterPtr)->DefaultValue = VectorParameter.NewValue;
+		}
 	}
-	for (const TParameterValueChange<UTexture*> TextureParameter : LayoutChangeInfo.TextureParameterValueChanges) {
-		UMaterialExpressionTextureSampleParameter* Parameter = TextureParameters.FindChecked(TextureParameter.ParameterName);
-		Parameter->Texture = TextureParameter.NewValue;
-		Parameter->AutoSetSampleType();
+	for (const TParameterValueChange<UTexture *> TextureParameter : LayoutChangeInfo.TextureParameterValueChanges)
+	{
+		UMaterialExpressionTextureSampleParameter **ParameterPtr = TextureParameters.Find(TextureParameter.ParameterName);
+		if (ParameterPtr && *ParameterPtr)
+		{
+			(*ParameterPtr)->Texture = TextureParameter.NewValue;
+			(*ParameterPtr)->AutoSetSampleType();
+		}
 	}
-	for (const TParameterValueChange<FSimpleFontParameterValue>& FontParameter : LayoutChangeInfo.FontParameterValueChanges) {
-		UMaterialExpressionFontSampleParameter* Parameter = FontParameters.FindChecked(FontParameter.ParameterName);
-		Parameter->Font = FontParameter.NewValue.Font;
-		Parameter->FontTexturePage = FontParameter.NewValue.FontPage;
+	for (const TParameterValueChange<FSimpleFontParameterValue> &FontParameter : LayoutChangeInfo.FontParameterValueChanges)
+	{
+		UMaterialExpressionFontSampleParameter **ParameterPtr = FontParameters.Find(FontParameter.ParameterName);
+		if (ParameterPtr && *ParameterPtr)
+		{
+			(*ParameterPtr)->Font = FontParameter.NewValue.Font;
+			(*ParameterPtr)->FontTexturePage = FontParameter.NewValue.FontPage;
+		}
 	}
-	for (const TParameterValueChange<URuntimeVirtualTexture*> TextureParameter : LayoutChangeInfo.VirtualTextureParameterValueChanges) {
-		UMaterialExpressionRuntimeVirtualTextureSampleParameter* Parameter = VirtualTextureParameters.FindChecked(TextureParameter.ParameterName);
-		Parameter->VirtualTexture = TextureParameter.NewValue;
+	for (const TParameterValueChange<URuntimeVirtualTexture *> TextureParameter : LayoutChangeInfo.VirtualTextureParameterValueChanges)
+	{
+		UMaterialExpressionRuntimeVirtualTextureSampleParameter **ParameterPtr = VirtualTextureParameters.Find(TextureParameter.ParameterName);
+		if (ParameterPtr && *ParameterPtr)
+		{
+			(*ParameterPtr)->VirtualTexture = TextureParameter.NewValue;
+		}
 	}
 }
 
-void UMaterialGenerator::SpawnNewMaterialParameterNodes(UMaterial* Material, FMaterialLayoutChangeInfo& LayoutChangeInfo) {
-	//Spawn nodes for new material parameters
-	for (const TMaterialParameter<float>& NewScalarParameter : LayoutChangeInfo.NewScalarParameters) {
-		if (NewScalarParameter.ParameterInfo.Association == GlobalParameter) {
-			UMaterialExpressionScalarParameter* Expression = SpawnMaterialExpression<UMaterialExpressionScalarParameter>(Material);
-			
+void UMaterialGenerator::SpawnNewMaterialParameterNodes(UMaterial *Material, FMaterialLayoutChangeInfo &LayoutChangeInfo)
+{
+	// Spawn nodes for new material parameters
+	for (const TMaterialParameter<float> &NewScalarParameter : LayoutChangeInfo.NewScalarParameters)
+	{
+		if (NewScalarParameter.ParameterInfo.Association == GlobalParameter)
+		{
+			UMaterialExpressionScalarParameter *Expression = SpawnMaterialExpression<UMaterialExpressionScalarParameter>(Material);
+
 			Expression->SetParameterName(NewScalarParameter.ParameterInfo.Name);
 			Expression->DefaultValue = NewScalarParameter.ParameterValue;
 		}
 	}
 
-	for (const TMaterialParameter<FLinearColor>& NewVectorParameter : LayoutChangeInfo.NewVectorParameters) {
-		if (NewVectorParameter.ParameterInfo.Association == GlobalParameter) {
-			UMaterialExpressionVectorParameter* Expression = SpawnMaterialExpression<UMaterialExpressionVectorParameter>(Material);
-			
+	for (const TMaterialParameter<FLinearColor> &NewVectorParameter : LayoutChangeInfo.NewVectorParameters)
+	{
+		if (NewVectorParameter.ParameterInfo.Association == GlobalParameter)
+		{
+			UMaterialExpressionVectorParameter *Expression = SpawnMaterialExpression<UMaterialExpressionVectorParameter>(Material);
+
 			Expression->SetParameterName(NewVectorParameter.ParameterInfo.Name);
 			Expression->DefaultValue = NewVectorParameter.ParameterValue;
 		}
 	}
 
-	for (const TMaterialParameter<UTexture*> NewTextureParameter : LayoutChangeInfo.NewTextureParameters) {
-		if (NewTextureParameter.ParameterInfo.Association == GlobalParameter && NewTextureParameter.ParameterValue) {
-			UClass* ExpressionClass = GetTextureSampleParameterClassForTexture(NewTextureParameter.ParameterValue);
-			UMaterialExpressionTextureSampleParameter* Expression = SpawnMaterialExpression<UMaterialExpressionTextureSampleParameter>(Material, ExpressionClass);
-			
+	for (const TMaterialParameter<UTexture *> NewTextureParameter : LayoutChangeInfo.NewTextureParameters)
+	{
+		if (NewTextureParameter.ParameterInfo.Association == GlobalParameter && NewTextureParameter.ParameterValue)
+		{
+			UClass *ExpressionClass = GetTextureSampleParameterClassForTexture(NewTextureParameter.ParameterValue);
+			UMaterialExpressionTextureSampleParameter *Expression = SpawnMaterialExpression<UMaterialExpressionTextureSampleParameter>(Material, ExpressionClass);
+
 			Expression->SetParameterName(NewTextureParameter.ParameterInfo.Name);
 			Expression->Texture = NewTextureParameter.ParameterValue;
 			Expression->AutoSetSampleType();
 		}
 	}
 
-	for (const TMaterialParameter<FSimpleFontParameterValue>& NewFontParameter : LayoutChangeInfo.NewFontParameters) {
-		if (NewFontParameter.ParameterInfo.Association == GlobalParameter) {
-			UMaterialExpressionFontSampleParameter* Expression = SpawnMaterialExpression<UMaterialExpressionFontSampleParameter>(Material);
-			
+	for (const TMaterialParameter<FSimpleFontParameterValue> &NewFontParameter : LayoutChangeInfo.NewFontParameters)
+	{
+		if (NewFontParameter.ParameterInfo.Association == GlobalParameter)
+		{
+			UMaterialExpressionFontSampleParameter *Expression = SpawnMaterialExpression<UMaterialExpressionFontSampleParameter>(Material);
+
 			Expression->SetParameterName(NewFontParameter.ParameterInfo.Name);
 			Expression->Font = NewFontParameter.ParameterValue.Font;
 			Expression->FontTexturePage = NewFontParameter.ParameterValue.FontPage;
 		}
 	}
 
-	for (const TMaterialParameter<URuntimeVirtualTexture*>& NewVirtualTextureParameter : LayoutChangeInfo.NewVirtualTextureParameters) {
-		if (NewVirtualTextureParameter.ParameterInfo.Association == GlobalParameter) {
-			UMaterialExpressionRuntimeVirtualTextureSampleParameter* Expression = SpawnMaterialExpression<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Material);
-			
+	for (const TMaterialParameter<URuntimeVirtualTexture *> &NewVirtualTextureParameter : LayoutChangeInfo.NewVirtualTextureParameters)
+	{
+		if (NewVirtualTextureParameter.ParameterInfo.Association == GlobalParameter)
+		{
+			UMaterialExpressionRuntimeVirtualTextureSampleParameter *Expression = SpawnMaterialExpression<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Material);
+
 			Expression->SetParameterName(NewVirtualTextureParameter.ParameterInfo.Name);
 			Expression->VirtualTexture = NewVirtualTextureParameter.ParameterValue;
 		}
 	}
 }
 
+void UMaterialGenerator::RemoveOutdatedMaterialLayoutNodes(UMaterial *Material, FMaterialLayoutChangeInfo &LayoutChangeInfo, bool bOnlyRemoveParameterNodes)
+{
+	// Remove all expressions that need to be removed first
+	TArray<UMaterialExpression *> ExpressionsToRemove;
 
-void UMaterialGenerator::RemoveOutdatedMaterialLayoutNodes(UMaterial* Material, FMaterialLayoutChangeInfo& LayoutChangeInfo, bool bOnlyRemoveParameterNodes) {
-	//Remove all expressions that need to be removed first
-	TArray<UMaterialExpression*> ExpressionsToRemove;
-	
-	for (UMaterialExpression* Expression : Material->Expressions) {
+	for (UMaterialExpression *Expression : Material->Expressions)
+	{
 
-		//HANDLE REMOVED PARAMETERS FIRST AND THEIR RELEVANT EXPRESSIONS
-		if (Expression->IsA<UMaterialExpressionScalarParameter>() || Expression->IsA<UMaterialExpressionVectorParameter>()) {
-			UMaterialExpressionParameter* ParameterExpression = CastChecked<UMaterialExpressionParameter>(Expression);
-			
-			if (LayoutChangeInfo.IsParameterNodeRemoved(ParameterExpression->ParameterName)) {
+		// HANDLE REMOVED PARAMETERS FIRST AND THEIR RELEVANT EXPRESSIONS
+		if (Expression->IsA<UMaterialExpressionScalarParameter>() || Expression->IsA<UMaterialExpressionVectorParameter>())
+		{
+			UMaterialExpressionParameter *ParameterExpression = CastChecked<UMaterialExpressionParameter>(Expression);
+
+			if (LayoutChangeInfo.IsParameterNodeRemoved(ParameterExpression->ParameterName))
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
-		
-		if (UMaterialExpressionTextureSampleParameter* TextureSampleParameter = Cast<UMaterialExpressionTextureSampleParameter>(Expression)) {
-			if (LayoutChangeInfo.IsParameterNodeRemoved(TextureSampleParameter->ParameterName)) {
+
+		if (UMaterialExpressionTextureSampleParameter *TextureSampleParameter = Cast<UMaterialExpressionTextureSampleParameter>(Expression))
+		{
+			if (LayoutChangeInfo.IsParameterNodeRemoved(TextureSampleParameter->ParameterName))
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
-		
-		if (UMaterialExpressionFontSampleParameter* FontSampleParameter = Cast<UMaterialExpressionFontSampleParameter>(Expression)) {
-			if (LayoutChangeInfo.IsParameterNodeRemoved(FontSampleParameter->ParameterName)) {
+
+		if (UMaterialExpressionFontSampleParameter *FontSampleParameter = Cast<UMaterialExpressionFontSampleParameter>(Expression))
+		{
+			if (LayoutChangeInfo.IsParameterNodeRemoved(FontSampleParameter->ParameterName))
+			{
 				ExpressionsToRemove.Remove(Expression);
 			}
 		}
-		
-		if (UMaterialExpressionRuntimeVirtualTextureSampleParameter* Parameter = Cast<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Expression)) {
-			if (LayoutChangeInfo.IsParameterNodeRemoved(Parameter->ParameterName)) {
+
+		if (UMaterialExpressionRuntimeVirtualTextureSampleParameter *Parameter = Cast<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Expression))
+		{
+			if (LayoutChangeInfo.IsParameterNodeRemoved(Parameter->ParameterName))
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
 
-		//HANDLE REMOVED DYNAMIC PARAMETERS
-		if (UMaterialExpressionDynamicParameter* DynamicParameter = Cast<UMaterialExpressionDynamicParameter>(Expression)) {
-			DynamicParameter->ParamNames.RemoveAll([&](const FString& ParameterName) {
+		// HANDLE REMOVED DYNAMIC PARAMETERS
+		if (UMaterialExpressionDynamicParameter *DynamicParameter = Cast<UMaterialExpressionDynamicParameter>(Expression))
+		{
+			DynamicParameter->ParamNames.RemoveAll([&](const FString &ParameterName)
+												   {
 				const FName ParameterFName = *ParameterName;
-				return LayoutChangeInfo.RemovedDynamicParameters.Contains(ParameterFName);
-			});
-			if (DynamicParameter->ParamNames.Num() == 0) {
+				return LayoutChangeInfo.RemovedDynamicParameters.Contains(ParameterFName); });
+			if (DynamicParameter->ParamNames.Num() == 0)
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
 
-		//HANDLE REMOVED GRASS TYPES
-		if (UMaterialExpressionLandscapeGrassOutput* GrassOutput = Cast<UMaterialExpressionLandscapeGrassOutput>(Expression)) {
-			GrassOutput->GrassTypes.RemoveAll([&](const FGrassInput& GrassInput) {
-					return LayoutChangeInfo.RemovedGrassTypes.Contains(GrassInput.GrassType);
-				});
-			//Keep the node during soft merge since even if it's empty, it's most likely connected with something
-			if (GrassOutput->GrassTypes.Num() == 0 && !bOnlyRemoveParameterNodes) {
+		// HANDLE REMOVED GRASS TYPES
+		if (UMaterialExpressionLandscapeGrassOutput *GrassOutput = Cast<UMaterialExpressionLandscapeGrassOutput>(Expression))
+		{
+			GrassOutput->GrassTypes.RemoveAll([&](const FGrassInput &GrassInput)
+											  { return LayoutChangeInfo.RemovedGrassTypes.Contains(GrassInput.GrassType); });
+			// Keep the node during soft merge since even if it's empty, it's most likely connected with something
+			if (GrassOutput->GrassTypes.Num() == 0 && !bOnlyRemoveParameterNodes)
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
 
-		//Remove unreferenced parameter collection parameters, but keep them during soft merge
-		if (UMaterialExpressionCollectionParameter* CollectionParameter = Cast<UMaterialExpressionCollectionParameter>(Expression)) {
-			if (LayoutChangeInfo.RemovedParameterCollections.Contains(CollectionParameter->Collection) && !bOnlyRemoveParameterNodes) {
+		// Remove unreferenced parameter collection parameters, but keep them during soft merge
+		if (UMaterialExpressionCollectionParameter *CollectionParameter = Cast<UMaterialExpressionCollectionParameter>(Expression))
+		{
+			if (LayoutChangeInfo.RemovedParameterCollections.Contains(CollectionParameter->Collection) && !bOnlyRemoveParameterNodes)
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
 
-		//Remove any expressions referencing textures that are no longer referenced, but keep them if we're doing soft merge
-		if (Expression->CanReferenceTexture() && !bOnlyRemoveParameterNodes) {
-			UObject* ReferencedTexture = Expression->GetReferencedTexture();
-			bool IsParameterChanged = LayoutChangeInfo.TextureParameterValueChanges.ContainsByPredicate([Expression](const TParameterValueChange<UTexture*>& ParameterValueChange) {
-				return ParameterValueChange.ParameterName == Expression->GetParameterName();
-			});
-			if (ReferencedTexture && LayoutChangeInfo.NoLongerReferencedTextures.Contains(ReferencedTexture) && !IsParameterChanged) {
+		// Remove any expressions referencing textures that are no longer referenced, but keep them if we're doing soft merge
+		if (Expression->CanReferenceTexture() && !bOnlyRemoveParameterNodes)
+		{
+			UObject *ReferencedTexture = Expression->GetReferencedTexture();
+			bool IsParameterChanged = LayoutChangeInfo.TextureParameterValueChanges.ContainsByPredicate([Expression](const TParameterValueChange<UTexture *> &ParameterValueChange)
+																										{ return ParameterValueChange.ParameterName == Expression->GetParameterName(); });
+			if (ReferencedTexture && LayoutChangeInfo.NoLongerReferencedTextures.Contains(ReferencedTexture) && !IsParameterChanged)
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
 
-		//Remove various nodes we know whenever are used or not, but only during hard merges (since they don't affect API)
-		if (Expression->IsA<UMaterialExpressionQualitySwitch>()) {
-			if (LayoutChangeInfo.bRemovedQualityLevelNode && !bOnlyRemoveParameterNodes) {
+		// Remove various nodes we know whenever are used or not, but only during hard merges (since they don't affect API)
+		if (Expression->IsA<UMaterialExpressionQualitySwitch>())
+		{
+			if (LayoutChangeInfo.bRemovedQualityLevelNode && !bOnlyRemoveParameterNodes)
+			{
 				ExpressionsToRemove.Add(Expression);
 			}
 		}
 
-		UPackage* EngineScriptPackage = UEngine::StaticClass()->GetOuterUPackage();
-		
-		UClass* SceneColorExpressionClass = FindObjectChecked<UClass>(EngineScriptPackage, TEXT("MaterialExpressionSceneColor"));
-		UClass* VirtualTextureOutputExpressionClass = FindObjectChecked<UClass>(EngineScriptPackage, TEXT("MaterialExpressionRuntimeVirtualTextureOutput"));
-		
-		if (Expression->IsA(SceneColorExpressionClass)) {
-			if (LayoutChangeInfo.bRemovedSceneColorExpression && !bOnlyRemoveParameterNodes) {
-				ExpressionsToRemove.Add(Expression);
+		UPackage *EngineScriptPackage = UEngine::StaticClass()->GetOuterUPackage();
+		if (EngineScriptPackage)
+		{
+			UClass *SceneColorExpressionClass = FindObject<UClass>(EngineScriptPackage, TEXT("MaterialExpressionSceneColor"));
+			UClass *VirtualTextureOutputExpressionClass = FindObject<UClass>(EngineScriptPackage, TEXT("MaterialExpressionRuntimeVirtualTextureOutput"));
+
+			if (SceneColorExpressionClass && Expression->IsA(SceneColorExpressionClass))
+			{
+				if (LayoutChangeInfo.bRemovedSceneColorExpression && !bOnlyRemoveParameterNodes)
+				{
+					ExpressionsToRemove.Add(Expression);
+				}
 			}
-		}
-		if (Expression->IsA(VirtualTextureOutputExpressionClass)) {
-			if (LayoutChangeInfo.bRemovedVirtualTextureOutput && !bOnlyRemoveParameterNodes) {
-				ExpressionsToRemove.Add(Expression);
+			if (VirtualTextureOutputExpressionClass && Expression->IsA(VirtualTextureOutputExpressionClass))
+			{
+				if (LayoutChangeInfo.bRemovedVirtualTextureOutput && !bOnlyRemoveParameterNodes)
+				{
+					ExpressionsToRemove.Add(Expression);
+				}
 			}
 		}
 	}
 
-	for (UMaterialExpression* RemovedExpression : ExpressionsToRemove) {
+	for (UMaterialExpression *RemovedExpression : ExpressionsToRemove)
+	{
 		Material->Expressions.Remove(RemovedExpression);
-		if (RemovedExpression->GraphNode) {
+		if (RemovedExpression->GraphNode)
+		{
 			FBlueprintEditorUtils::RemoveNode(NULL, RemovedExpression->GraphNode, true);
 		}
 	}
 }
 
-void UMaterialGenerator::CleanupStubMaterialNodes(UMaterial* Material) {
-	for (int32 i = Material->Expressions.Num() - 1; i >= 0; i--) {
-		UMaterialExpression* Expression = Material->Expressions[i];
-		if (Expression->Desc.StartsWith(TEXT("[STUB NODE]"))) {
-			
+void UMaterialGenerator::CleanupStubMaterialNodes(UMaterial *Material)
+{
+	for (int32 i = Material->Expressions.Num() - 1; i >= 0; i--)
+	{
+		UMaterialExpression *Expression = Material->Expressions[i];
+		if (Expression->Desc.StartsWith(TEXT("[STUB NODE]")))
+		{
+
 			Material->Expressions.Remove(Expression);
-			if (Expression->GraphNode) {
+			if (Expression->GraphNode)
+			{
 				FBlueprintEditorUtils::RemoveNode(NULL, Expression->GraphNode, true);
 			}
 		}
 	}
 }
 
-void DisconnectIfExpressionMissing(FExpressionInput& Input, UMaterial* Material) {
-	if (Input.Expression && !Material->Expressions.Contains(Input.Expression)) {
+void DisconnectIfExpressionMissing(FExpressionInput &Input, UMaterial *Material)
+{
+	if (Input.Expression && !Material->Expressions.Contains(Input.Expression))
+	{
 		Input.Expression = nullptr;
 	}
 }
 
-void UMaterialGenerator::TryConnectBasicMaterialPins(UMaterial* Material) {
-	FExpressionInput& BaseColorInput = Material->BaseColor;
-	FExpressionInput& NormalInput = Material->Normal;
+void UMaterialGenerator::TryConnectBasicMaterialPins(UMaterial *Material)
+{
+	FExpressionInput &BaseColorInput = Material->BaseColor;
+	FExpressionInput &NormalInput = Material->Normal;
 
 	DisconnectIfExpressionMissing(BaseColorInput, Material);
 	DisconnectIfExpressionMissing(NormalInput, Material);
 
-	for (UMaterialExpression* Expression : Material->Expressions) {
-		if (UMaterialExpressionTextureSample* TextureSample = Cast<UMaterialExpressionTextureSample>(Expression)) {
-			if ((TextureSample->SamplerType == SAMPLERTYPE_Color || TextureSample->SamplerType == SAMPLERTYPE_LinearColor) && !BaseColorInput.IsConnected()) {
+	for (UMaterialExpression *Expression : Material->Expressions)
+	{
+		if (UMaterialExpressionTextureSample *TextureSample = Cast<UMaterialExpressionTextureSample>(Expression))
+		{
+			if ((TextureSample->SamplerType == SAMPLERTYPE_Color || TextureSample->SamplerType == SAMPLERTYPE_LinearColor) && !BaseColorInput.IsConnected())
+			{
 				BaseColorInput.Connect(0, TextureSample);
 			}
-			else if (TextureSample->SamplerType == SAMPLERTYPE_Normal && !NormalInput.IsConnected()) {
+			else if (TextureSample->SamplerType == SAMPLERTYPE_Normal && !NormalInput.IsConnected())
+			{
 				NormalInput.Connect(0, TextureSample);
 			}
 		}
@@ -589,38 +778,48 @@ void UMaterialGenerator::TryConnectBasicMaterialPins(UMaterial* Material) {
 
 PRAGMA_DISABLE_OPTIMIZATION
 
-void UMaterialGenerator::ConnectDummyParameterNodes(UMaterial* Material) {
-	if (Material->Roughness.IsConnected()) {
+void UMaterialGenerator::ConnectDummyParameterNodes(UMaterial *Material)
+{
+	if (Material->Roughness.IsConnected())
+	{
 		return;
 	}
-	
-	TArray<UMaterialExpression*> AllParameters;
-	TArray<UMaterialExpressionStaticSwitchParameter*> StaticSwitchParameters;
 
-	for (UMaterialExpression* Expression : Material->Expressions) {
-		if (UMaterialExpressionTextureSampleParameter* TextureSampleParameter = Cast<UMaterialExpressionTextureSampleParameter>(Expression)) {
+	TArray<UMaterialExpression *> AllParameters;
+	TArray<UMaterialExpressionStaticSwitchParameter *> StaticSwitchParameters;
+
+	for (UMaterialExpression *Expression : Material->Expressions)
+	{
+		if (UMaterialExpressionTextureSampleParameter *TextureSampleParameter = Cast<UMaterialExpressionTextureSampleParameter>(Expression))
+		{
 			AllParameters.Add(TextureSampleParameter);
 		}
-		if (UMaterialExpressionFontSampleParameter* FontSampleParameter = Cast<UMaterialExpressionFontSampleParameter>(Expression)) {
+		if (UMaterialExpressionFontSampleParameter *FontSampleParameter = Cast<UMaterialExpressionFontSampleParameter>(Expression))
+		{
 			AllParameters.Add(FontSampleParameter);
 		}
-		if (UMaterialExpressionRuntimeVirtualTextureSampleParameter* VirtualTextureSampleParameter = Cast<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Expression)) {
+		if (UMaterialExpressionRuntimeVirtualTextureSampleParameter *VirtualTextureSampleParameter = Cast<UMaterialExpressionRuntimeVirtualTextureSampleParameter>(Expression))
+		{
 			AllParameters.Add(VirtualTextureSampleParameter);
 		}
-		if (UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression)) {
+		if (UMaterialExpressionScalarParameter *ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression))
+		{
 			AllParameters.Add(ScalarParameter);
 		}
-		if (UMaterialExpressionVectorParameter* VectorParameter = Cast<UMaterialExpressionVectorParameter>(Expression)) {
+		if (UMaterialExpressionVectorParameter *VectorParameter = Cast<UMaterialExpressionVectorParameter>(Expression))
+		{
 			AllParameters.Add(VectorParameter);
 		}
-		if (UMaterialExpressionStaticSwitchParameter* StaticSwitchParameter = Cast<UMaterialExpressionStaticSwitchParameter>(Expression)) {
+		if (UMaterialExpressionStaticSwitchParameter *StaticSwitchParameter = Cast<UMaterialExpressionStaticSwitchParameter>(Expression))
+		{
 			AllParameters.Add(StaticSwitchParameter);
 			StaticSwitchParameters.Add(StaticSwitchParameter);
 		}
 	}
 
-	for (UMaterialExpressionStaticSwitchParameter* StaticSwitchParameter : StaticSwitchParameters) {
-		UMaterialExpressionConstant* ExpressionConstant = SpawnMaterialExpression<UMaterialExpressionConstant>(Material);
+	for (UMaterialExpressionStaticSwitchParameter *StaticSwitchParameter : StaticSwitchParameters)
+	{
+		UMaterialExpressionConstant *ExpressionConstant = SpawnMaterialExpression<UMaterialExpressionConstant>(Material);
 
 		StaticSwitchParameter->A.Connect(0, ExpressionConstant);
 		StaticSwitchParameter->B.Connect(0, ExpressionConstant);
@@ -629,26 +828,29 @@ void UMaterialGenerator::ConnectDummyParameterNodes(UMaterial* Material) {
 	}
 
 	int32 ParameterIndex = 0;
-	UMaterialExpression* LastAddExpression = NULL;
+	UMaterialExpression *LastAddExpression = NULL;
 
-	if (AllParameters.Num()) {
+	if (AllParameters.Num())
+	{
 		LastAddExpression = AllParameters[ParameterIndex];
 		ParameterIndex++;
 	}
 
-	for (int32 i = ParameterIndex; i < AllParameters.Num(); i++) {
-		UMaterialExpressionMultiply* ExpressionMultiply = SpawnMaterialExpression<UMaterialExpressionMultiply>(Material);
-		
+	for (int32 i = ParameterIndex; i < AllParameters.Num(); i++)
+	{
+		UMaterialExpressionMultiply *ExpressionMultiply = SpawnMaterialExpression<UMaterialExpressionMultiply>(Material);
+
 		ExpressionMultiply->A.Connect(0, LastAddExpression);
 		ExpressionMultiply->B.Connect(0, AllParameters[i]);
-		
+
 		ExpressionMultiply->Desc = TEXT("[STUB NODE] Stub just to get parameters connected and showing up in child material instances");
 
 		LastAddExpression = ExpressionMultiply;
 	}
 
-	if (LastAddExpression != NULL) {
-		UMaterialExpressionMultiply* ZeroMultiply = SpawnMaterialExpression<UMaterialExpressionMultiply>(Material);
+	if (LastAddExpression != NULL)
+	{
+		UMaterialExpressionMultiply *ZeroMultiply = SpawnMaterialExpression<UMaterialExpressionMultiply>(Material);
 		ZeroMultiply->A.Connect(0, LastAddExpression);
 		ZeroMultiply->ConstB = 0.0f;
 		ZeroMultiply->Desc = TEXT("[STUB NODE] Stub just to get parameters connected and showing up in child material instances");
@@ -659,27 +861,29 @@ void UMaterialGenerator::ConnectDummyParameterNodes(UMaterial* Material) {
 
 PRAGMA_ENABLE_OPTIMIZATION
 
-void UMaterialGenerator::CreateGeneratedMaterialComment(UMaterial* Material) {
+void UMaterialGenerator::CreateGeneratedMaterialComment(UMaterial *Material)
+{
 	FString ResultCommentText;
 	ResultCommentText.Append(TEXT("[AUTO GENERATED MATERIAL STUB]\n"));
 	ResultCommentText.Append(TEXT("This material is an auto generated stub for the game material with the same name.\n"));
-	
+
 	ResultCommentText.Append(TEXT("Stub materials contain minimal information about real material's implementation, \n"));
 	ResultCommentText.Append(TEXT("like Material Parameters, Used Textures and Parameter Collections, \n"));
 	ResultCommentText.Append(TEXT("but that information is automatically brought up to date.\n"));
-	
+
 	ResultCommentText.Append(TEXT("If you're willing to make any changes to the material, REMOVE THAT COMMENT,\n"));
 	ResultCommentText.Append(TEXT("Or your changes might be overwritten in the future\n"));
 
 	SpawnCommentWithText(Material, ResultCommentText, FVector2D(300, 0));
 }
 
-FString UMaterialGenerator::CreateMaterialChangelistCommentText(const FMaterialLayoutChangeInfo& ChangeInfo) {
+FString UMaterialGenerator::CreateMaterialChangelistCommentText(const FMaterialLayoutChangeInfo &ChangeInfo)
+{
 	FString ResultCommentText;
 	ResultCommentText.Append(TEXT("[MATERIAL CHANGELIST SUMMARY]"));
 	ResultCommentText.Append(TEXT("This material appears to have been manually edited, and because of that\n"));
 	ResultCommentText.Append(TEXT("automatic stub update is not possible.\n"));
-	
+
 	ResultCommentText.Append(TEXT("Here is the summary of changes that appeared in the game material,\n"));
 	ResultCommentText.Append(TEXT("compared to the current version of the material: "));
 
@@ -696,100 +900,131 @@ FString UMaterialGenerator::CreateMaterialChangelistCommentText(const FMaterialL
 	return ResultCommentText;
 }
 
-void UMaterialGenerator::SpawnCommentWithText(UMaterial* Material, const FString& CommentText, const FVector2D& NodePos) {
-	UMaterialExpressionComment* NewComment = NewObject<UMaterialExpressionComment>(Material, NAME_None, RF_Transactional);
+void UMaterialGenerator::SpawnCommentWithText(UMaterial *Material, const FString &CommentText, const FVector2D &NodePos)
+{
+	UMaterialExpressionComment *NewComment = NewObject<UMaterialExpressionComment>(Material, NAME_None, RF_Transactional);
 	NewComment->Text = CommentText;
 
 	NewComment->MaterialExpressionEditorX = NodePos.X;
 	NewComment->MaterialExpressionEditorY = NodePos.Y;
 	NewComment->SizeX = 600;
 	NewComment->SizeY = 400;
-		
+
 	Material->EditorComments.Add(NewComment);
-	if (Material->MaterialGraph) {
+	if (Material->MaterialGraph)
+	{
 		Material->MaterialGraph->AddComment(NewComment, false);
 	}
 }
 
-void UMaterialGenerator::RemoveMaterialComment(UMaterial* Material, UMaterialExpressionComment* Comment) {
-	if (Comment->GraphNode) {
+void UMaterialGenerator::RemoveMaterialComment(UMaterial *Material, UMaterialExpressionComment *Comment)
+{
+	if (Comment->GraphNode)
+	{
 		FBlueprintEditorUtils::RemoveNode(NULL, Comment->GraphNode, true);
 	}
 	Material->EditorComments.Remove(Comment);
 }
 
-void UMaterialGenerator::DetectMaterialExpressionChanges(const FMaterialCachedExpressionData& OldData, const FMaterialCachedExpressionData& NewData, FMaterialLayoutChangeInfo& ChangeInfo) {
+void UMaterialGenerator::DetectMaterialExpressionChanges(const FMaterialCachedExpressionData &OldData, const FMaterialCachedExpressionData &NewData, FMaterialLayoutChangeInfo &ChangeInfo)
+{
 #if ENGINE_MINOR_VERSION >= 26
 	DetectMaterialParameterChanges(OldData.Parameters, NewData.Parameters, ChangeInfo);
 #endif
-	for (UObject* Element : NewData.ReferencedTextures) {
-		UTexture* Texture = Cast<UTexture>(Element);
-		if (Texture && !OldData.ReferencedTextures.Contains(Texture)) {
+	for (UObject *Element : NewData.ReferencedTextures)
+	{
+		UTexture *Texture = Cast<UTexture>(Element);
+		if (Texture && !OldData.ReferencedTextures.Contains(Texture))
+		{
 			ChangeInfo.NewReferencedTextures.Add(Texture);
 		}
 	}
-	for (UObject* Element : OldData.ReferencedTextures) {
-		UTexture* Texture = Cast<UTexture>(Element);
-		if (Texture && !NewData.ReferencedTextures.Contains(Texture)) {
+	for (UObject *Element : OldData.ReferencedTextures)
+	{
+		UTexture *Texture = Cast<UTexture>(Element);
+		if (Texture && !NewData.ReferencedTextures.Contains(Texture))
+		{
 			ChangeInfo.NoLongerReferencedTextures.Add(Texture);
 		}
 	}
 
-	for (const FName& Element : NewData.DynamicParameterNames) {
-		if (!OldData.DynamicParameterNames.Contains(Element)) {
+	for (const FName &Element : NewData.DynamicParameterNames)
+	{
+		if (!OldData.DynamicParameterNames.Contains(Element))
+		{
 			ChangeInfo.NewDynamicParameters.Add(Element);
 		}
 	}
-	for (const FName& Element : OldData.DynamicParameterNames) {
-		if (!NewData.DynamicParameterNames.Contains(Element)) {
+	for (const FName &Element : OldData.DynamicParameterNames)
+	{
+		if (!NewData.DynamicParameterNames.Contains(Element))
+		{
 			ChangeInfo.RemovedDynamicParameters.Add(Element);
 		}
 	}
-	
-	for (ULandscapeGrassType* Element : NewData.GrassTypes) {
-		if (!OldData.GrassTypes.Contains(Element)) {
+
+	for (ULandscapeGrassType *Element : NewData.GrassTypes)
+	{
+		if (!OldData.GrassTypes.Contains(Element))
+		{
 			ChangeInfo.NewGrassTypes.Add(Element);
 		}
 	}
-	for (ULandscapeGrassType* Element : OldData.GrassTypes) {
-		if (!NewData.GrassTypes.Contains(Element)) {
+	for (ULandscapeGrassType *Element : OldData.GrassTypes)
+	{
+		if (!NewData.GrassTypes.Contains(Element))
+		{
 			ChangeInfo.RemovedGrassTypes.Add(Element);
 		}
 	}
 
-	TArray<UMaterialParameterCollection*> OldReferencedCollections;
-	TArray<UMaterialParameterCollection*> NewReferencedCollections;
+	TArray<UMaterialParameterCollection *> OldReferencedCollections;
+	TArray<UMaterialParameterCollection *> NewReferencedCollections;
 
-	for (const FMaterialParameterCollectionInfo& ParameterCollectionInfo : OldData.ParameterCollectionInfos) {
+	for (const FMaterialParameterCollectionInfo &ParameterCollectionInfo : OldData.ParameterCollectionInfos)
+	{
 		OldReferencedCollections.Add(ParameterCollectionInfo.ParameterCollection);
 	}
-	for (const FMaterialParameterCollectionInfo& ParameterCollectionInfo : NewData.ParameterCollectionInfos) {
+	for (const FMaterialParameterCollectionInfo &ParameterCollectionInfo : NewData.ParameterCollectionInfos)
+	{
 		NewReferencedCollections.Add(ParameterCollectionInfo.ParameterCollection);
 	}
 
-	for (UMaterialParameterCollection* Element : NewReferencedCollections) {
-		if (!OldReferencedCollections.Contains(Element)) {
+	for (UMaterialParameterCollection *Element : NewReferencedCollections)
+	{
+		if (!OldReferencedCollections.Contains(Element))
+		{
 			ChangeInfo.NewReferencedParameterCollections.Add(Element);
 		}
 	}
-	for (UMaterialParameterCollection* Element : OldReferencedCollections) {
-		if (!NewReferencedCollections.Contains(Element)) {
+	for (UMaterialParameterCollection *Element : OldReferencedCollections)
+	{
+		if (!NewReferencedCollections.Contains(Element))
+		{
 			ChangeInfo.RemovedParameterCollections.Add(Element);
 		}
 	}
 
-	if (OldData.bHasSceneColor != NewData.bHasSceneColor) {
-		if (OldData.bHasSceneColor) {
+	if (OldData.bHasSceneColor != NewData.bHasSceneColor)
+	{
+		if (OldData.bHasSceneColor)
+		{
 			ChangeInfo.bRemovedSceneColorExpression = true;
-		} else if (NewData.bHasSceneColor) {
+		}
+		else if (NewData.bHasSceneColor)
+		{
 			ChangeInfo.bAddedSceneColorExpression = true;
 		}
 	}
 
-	if (OldData.bHasRuntimeVirtualTextureOutput != NewData.bHasRuntimeVirtualTextureOutput) {
-		if (OldData.bHasRuntimeVirtualTextureOutput) {
+	if (OldData.bHasRuntimeVirtualTextureOutput != NewData.bHasRuntimeVirtualTextureOutput)
+	{
+		if (OldData.bHasRuntimeVirtualTextureOutput)
+		{
 			ChangeInfo.bRemovedVirtualTextureOutput = true;
-		} else if (NewData.bHasRuntimeVirtualTextureOutput) {
+		}
+		else if (NewData.bHasRuntimeVirtualTextureOutput)
+		{
 			ChangeInfo.bAddedVirtualTextureOutput = true;
 		}
 	}
@@ -797,81 +1032,111 @@ void UMaterialGenerator::DetectMaterialExpressionChanges(const FMaterialCachedEx
 	const bool bOldHasQualityLevel = IsMaterialQualityNodeUsed(OldData);
 	const bool bNewHasQualityLevel = IsMaterialQualityNodeUsed(NewData);
 
-	if (bOldHasQualityLevel != bNewHasQualityLevel) {
-		if (bOldHasQualityLevel) {
+	if (bOldHasQualityLevel != bNewHasQualityLevel)
+	{
+		if (bOldHasQualityLevel)
+		{
 			ChangeInfo.bRemovedQualityLevelNode = true;
-		} else if (bNewHasQualityLevel) {
+		}
+		else if (bNewHasQualityLevel)
+		{
 			ChangeInfo.bAddedQualityLevelNode = true;
 		}
 	}
 }
 
-//UMaterialExpressionQualitySwitch is used when either of Low/Medium QualityLevel parameters are not false, or High one is false
-//High will always be set by default when no quality nodes are present
-bool UMaterialGenerator::IsMaterialQualityNodeUsed(const FMaterialCachedExpressionData& Data) {
-	if (Data.QualityLevelsUsed.Num() != 3) {
+// UMaterialExpressionQualitySwitch is used when either of Low/Medium QualityLevel parameters are not false, or High one is false
+// High will always be set by default when no quality nodes are present
+bool UMaterialGenerator::IsMaterialQualityNodeUsed(const FMaterialCachedExpressionData &Data)
+{
+	if (Data.QualityLevelsUsed.Num() != 3)
+	{
 		return false;
 	}
-	if (Data.QualityLevelsUsed[EMaterialQualityLevel::Low] || Data.QualityLevelsUsed[EMaterialQualityLevel::Medium]) {
+	if (Data.QualityLevelsUsed[EMaterialQualityLevel::Low] || Data.QualityLevelsUsed[EMaterialQualityLevel::Medium])
+	{
 		return true;
 	}
-	if (!Data.QualityLevelsUsed[EMaterialQualityLevel::High]) {
+	if (!Data.QualityLevelsUsed[EMaterialQualityLevel::High])
+	{
 		return true;
 	}
 	return false;
 }
 
 #if ENGINE_MINOR_VERSION >= 26
-void UMaterialGenerator::DetectMaterialParameterChanges(const FMaterialCachedParameters& OldParams, const FMaterialCachedParameters& NewParams, FMaterialLayoutChangeInfo& ChangeInfo) {
+void UMaterialGenerator::DetectMaterialParameterChanges(const FMaterialCachedParameters &OldParams, const FMaterialCachedParameters &NewParams, FMaterialLayoutChangeInfo &ChangeInfo)
+{
 	TSet<FName> AllParameterNames;
 	TMap<FName, FIndexedParameterInfo> OldParameters;
 	TMap<FName, FIndexedParameterInfo> NewParameters;
-	
-	
-	const FMaterialCachedParameterEntry* OldEntryArray = OldParams.RuntimeEntries;
-	const FMaterialCachedParameterEntry* NewEntryArray = NewParams.RuntimeEntries;
-	
-	for (int32 ParameterTypeRaw = 0; ParameterTypeRaw < NumMaterialRuntimeParameterTypes; ParameterTypeRaw++) {
-		
-		EMaterialParameterType ParameterType = (EMaterialParameterType) ParameterTypeRaw;
-		
-		const FMaterialCachedParameterEntry& OldParameterEntry = OldEntryArray[ParameterTypeRaw];
-		const FMaterialCachedParameterEntry& NewParameterEntry = NewEntryArray[ParameterTypeRaw];
 
-		for (int32 i = 0; i < OldParameterEntry.ParameterInfos.Num(); i++) {
-			const FMaterialParameterInfo& ParameterInfo = OldParameterEntry.ParameterInfos[i];
+	const FMaterialCachedParameterEntry *OldEntryArray = OldParams.RuntimeEntries;
+	const FMaterialCachedParameterEntry *NewEntryArray = NewParams.RuntimeEntries;
+
+	// Early return if either entry array is null to prevent access violation
+	if (!OldEntryArray || !NewEntryArray)
+	{
+		UE_LOG(LogAssetGenerator, Warning, TEXT("Material parameter RuntimeEntries is null, skipping parameter change detection"));
+		return;
+	}
+
+	for (int32 ParameterTypeRaw = 0; ParameterTypeRaw < NumMaterialRuntimeParameterTypes; ParameterTypeRaw++)
+	{
+
+		EMaterialParameterType ParameterType = (EMaterialParameterType)ParameterTypeRaw;
+
+		const FMaterialCachedParameterEntry &OldParameterEntry = OldEntryArray[ParameterTypeRaw];
+		const FMaterialCachedParameterEntry &NewParameterEntry = NewEntryArray[ParameterTypeRaw];
+
+		// Validate that ParameterInfos arrays are properly initialized
+		if (!OldParameterEntry.ParameterInfos.GetData() || !NewParameterEntry.ParameterInfos.GetData())
+		{
+			continue;
+		}
+
+		for (int32 i = 0; i < OldParameterEntry.ParameterInfos.Num(); i++)
+		{
+			const FMaterialParameterInfo &ParameterInfo = OldParameterEntry.ParameterInfos[i];
 			AllParameterNames.Add(ParameterInfo.Name);
 			OldParameters.Add(ParameterInfo.Name, {ParameterInfo, ParameterType, i});
 		}
 
-		for (int32 i = 0; i < NewParameterEntry.ParameterInfos.Num(); i++) {
-			const FMaterialParameterInfo& ParameterInfo = NewParameterEntry.ParameterInfos[i];
+		for (int32 i = 0; i < NewParameterEntry.ParameterInfos.Num(); i++)
+		{
+			const FMaterialParameterInfo &ParameterInfo = NewParameterEntry.ParameterInfos[i];
 			AllParameterNames.Add(ParameterInfo.Name);
 			NewParameters.Add(ParameterInfo.Name, {ParameterInfo, ParameterType, i});
 		}
 	}
 
-	for (const FName& ParameterName : AllParameterNames) {
-		FIndexedParameterInfo* OldParameterInfo = OldParameters.Find(ParameterName);
-		FIndexedParameterInfo* NewParameterInfo = NewParameters.Find(ParameterName);
+	for (const FName &ParameterName : AllParameterNames)
+	{
+		FIndexedParameterInfo *OldParameterInfo = OldParameters.Find(ParameterName);
+		FIndexedParameterInfo *NewParameterInfo = NewParameters.Find(ParameterName);
 
-		if (OldParameterInfo != NULL && NewParameterInfo != NULL) {
+		if (OldParameterInfo != NULL && NewParameterInfo != NULL)
+		{
 			if (OldParameterInfo->ParameterType != NewParameterInfo->ParameterType ||
 				OldParameterInfo->ParameterInfo.Association != NewParameterInfo->ParameterInfo.Association ||
-				OldParameterInfo->ParameterInfo.Index != NewParameterInfo->ParameterInfo.Index) {
+				OldParameterInfo->ParameterInfo.Index != NewParameterInfo->ParameterInfo.Index)
+			{
 
-				//Parameter has changed too drastically to announce it as value change, so remove it and add back
+				// Parameter has changed too drastically to announce it as value change, so remove it and add back
 				ChangeInfo.RemovedMaterialParameters.Add(OldParameterInfo->ParameterInfo);
 				AddNewParameterInfo(NewParams, NewParameterInfo->ParameterIndex, NewParameterInfo->ParameterType, NewParameterInfo->ParameterInfo, ChangeInfo);
-
-			} else {
+			}
+			else
+			{
 				CompareParameterValues(OldParams, NewParams, OldParameterInfo->ParameterIndex, NewParameterInfo->ParameterIndex, NewParameterInfo->ParameterType, ParameterName, ChangeInfo);
 			}
-			
-		} else if (OldParameterInfo == NULL) {
+		}
+		else if (OldParameterInfo == NULL && NewParameterInfo != NULL)
+		{
 			AddNewParameterInfo(NewParams, NewParameterInfo->ParameterIndex, NewParameterInfo->ParameterType, NewParameterInfo->ParameterInfo, ChangeInfo);
-
-		} else if (NewParameterInfo == NULL) {
+		}
+		else if (NewParameterInfo == NULL && OldParameterInfo != NULL)
+		{
 			ChangeInfo.RemovedMaterialParameters.Add(OldParameterInfo->ParameterInfo);
 		}
 	}
@@ -879,88 +1144,145 @@ void UMaterialGenerator::DetectMaterialParameterChanges(const FMaterialCachedPar
 
 #endif
 
-void UMaterialGenerator::AddNewParameterInfo(const FMaterialCachedParameters& Params, int32 Index, EMaterialParameterType Type, const FMaterialParameterInfo& ParameterInfo, FMaterialLayoutChangeInfo& ChangeInfo) {
-	if (Type == EMaterialParameterType::Scalar) {
-		const float Value = Params.ScalarValues[Index];
-		ChangeInfo.NewScalarParameters.Add({ParameterInfo, Value});
+void UMaterialGenerator::AddNewParameterInfo(const FMaterialCachedParameters &Params, int32 Index, EMaterialParameterType Type, const FMaterialParameterInfo &ParameterInfo, FMaterialLayoutChangeInfo &ChangeInfo)
+{
+	if (Type == EMaterialParameterType::Scalar)
+	{
+		if (Index >= 0 && Index < Params.ScalarValues.Num())
+		{
+			const float Value = Params.ScalarValues[Index];
+			ChangeInfo.NewScalarParameters.Add({ParameterInfo, Value});
+		}
 	}
-	else if (Type == EMaterialParameterType::Vector) {
-		FLinearColor Value = Params.VectorValues[Index];
-		ChangeInfo.NewVectorParameters.Add({ParameterInfo, Value});
+	else if (Type == EMaterialParameterType::Vector)
+	{
+		if (Index >= 0 && Index < Params.VectorValues.Num())
+		{
+			FLinearColor Value = Params.VectorValues[Index];
+			ChangeInfo.NewVectorParameters.Add({ParameterInfo, Value});
+		}
 	}
-	else if (Type == EMaterialParameterType::Texture) {
-		UTexture* Value = Params.TextureValues[Index];
-		ChangeInfo.NewTextureParameters.Add({ParameterInfo, Value});
+	else if (Type == EMaterialParameterType::Texture)
+	{
+		if (Index >= 0 && Index < Params.TextureValues.Num())
+		{
+			UTexture *Value = Params.TextureValues[Index];
+			ChangeInfo.NewTextureParameters.Add({ParameterInfo, Value});
+		}
 	}
-	else if (Type == EMaterialParameterType::Font) {
-		UFont* Font = Params.FontValues[Index];
-		ChangeInfo.NewFontParameters.Add({ParameterInfo, Font});
+	else if (Type == EMaterialParameterType::Font)
+	{
+		if (Index >= 0 && Index < Params.FontValues.Num())
+		{
+			UFont *Font = Params.FontValues[Index];
+			ChangeInfo.NewFontParameters.Add({ParameterInfo, Font});
+		}
 	}
-	else if (Type == EMaterialParameterType::RuntimeVirtualTexture) {
-		URuntimeVirtualTexture* Texture = Params.RuntimeVirtualTextureValues[Index];
-		ChangeInfo.NewVirtualTextureParameters.Add({ParameterInfo, Texture});
+	else if (Type == EMaterialParameterType::RuntimeVirtualTexture)
+	{
+		if (Index >= 0 && Index < Params.RuntimeVirtualTextureValues.Num())
+		{
+			URuntimeVirtualTexture *Texture = Params.RuntimeVirtualTextureValues[Index];
+			ChangeInfo.NewVirtualTextureParameters.Add({ParameterInfo, Texture});
+		}
 	}
 }
 
-void UMaterialGenerator::CompareParameterValues(const FMaterialCachedParameters& OldParams, const FMaterialCachedParameters& NewParams, int32 IndexOld, int32 IndexNew, EMaterialParameterType Type, FName ParameterName, FMaterialLayoutChangeInfo& ChangeInfo) {
-	if (Type == EMaterialParameterType::Scalar) {
-		float OldValue = OldParams.ScalarValues[IndexOld];
-		float NewValue = NewParams.ScalarValues[IndexNew];
+void UMaterialGenerator::CompareParameterValues(const FMaterialCachedParameters &OldParams, const FMaterialCachedParameters &NewParams, int32 IndexOld, int32 IndexNew, EMaterialParameterType Type, FName ParameterName, FMaterialLayoutChangeInfo &ChangeInfo)
+{
+	if (Type == EMaterialParameterType::Scalar)
+	{
+		if (IndexOld >= 0 && IndexOld < OldParams.ScalarValues.Num() && IndexNew >= 0 && IndexNew < NewParams.ScalarValues.Num())
+		{
+			float OldValue = OldParams.ScalarValues[IndexOld];
+			float NewValue = NewParams.ScalarValues[IndexNew];
 
-		if (FMath::Abs(OldValue - NewValue) >= KINDA_SMALL_NUMBER) {
-			ChangeInfo.ScalarParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			if (FMath::Abs(OldValue - NewValue) >= KINDA_SMALL_NUMBER)
+			{
+				ChangeInfo.ScalarParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			}
 		}
 	}
-	else if (Type == EMaterialParameterType::Vector) {
-		FLinearColor OldValue = OldParams.VectorValues[IndexOld];
-		FLinearColor NewValue = NewParams.VectorValues[IndexNew];
+	else if (Type == EMaterialParameterType::Vector)
+	{
+		if (IndexOld >= 0 && IndexOld < OldParams.VectorValues.Num() && IndexNew >= 0 && IndexNew < NewParams.VectorValues.Num())
+		{
+			FLinearColor OldValue = OldParams.VectorValues[IndexOld];
+			FLinearColor NewValue = NewParams.VectorValues[IndexNew];
 
-		if (!OldValue.Equals(NewValue, KINDA_SMALL_NUMBER)) {
-			ChangeInfo.VectorParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			if (!OldValue.Equals(NewValue, KINDA_SMALL_NUMBER))
+			{
+				ChangeInfo.VectorParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			}
 		}
 	}
-	else if (Type == EMaterialParameterType::Texture) {
-		UTexture* OldValue = OldParams.TextureValues[IndexOld];
-		UTexture* NewValue = NewParams.TextureValues[IndexNew];
+	else if (Type == EMaterialParameterType::Texture)
+	{
+		if (IndexOld >= 0 && IndexOld < OldParams.TextureValues.Num() && IndexNew >= 0 && IndexNew < NewParams.TextureValues.Num())
+		{
+			UTexture *OldValue = OldParams.TextureValues[IndexOld];
+			UTexture *NewValue = NewParams.TextureValues[IndexNew];
 
-		if (OldValue != NewValue) {
-			ChangeInfo.TextureParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			if (OldValue != NewValue)
+			{
+				ChangeInfo.TextureParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			}
 		}
 	}
-	else if (Type == EMaterialParameterType::Font) {
-		UFont* OldFont = OldParams.FontValues[IndexOld];
-		UFont* NewFont = NewParams.FontValues[IndexNew];
+	else if (Type == EMaterialParameterType::Font)
+	{
+		if (IndexOld >= 0 && IndexOld < OldParams.FontValues.Num() && IndexNew >= 0 && IndexNew < NewParams.FontValues.Num() &&
+			IndexOld < OldParams.FontPageValues.Num() && IndexNew < NewParams.FontPageValues.Num())
+		{
+			UFont *OldFont = OldParams.FontValues[IndexOld];
+			UFont *NewFont = NewParams.FontValues[IndexNew];
 
-		int32 OldFontPage = OldParams.FontPageValues[IndexOld];
-		int32 NewFontPage = NewParams.FontPageValues[IndexNew];
+			int32 OldFontPage = OldParams.FontPageValues[IndexOld];
+			int32 NewFontPage = NewParams.FontPageValues[IndexNew];
 
-		if (OldFont != NewFont || OldFontPage != NewFontPage) {
-			const FSimpleFontParameterValue OldValue{OldFont, OldFontPage};
-			const FSimpleFontParameterValue NewValue{NewFont, NewFontPage};
-			
-			ChangeInfo.FontParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			if (OldFont != NewFont || OldFontPage != NewFontPage)
+			{
+				const FSimpleFontParameterValue OldValue{OldFont, OldFontPage};
+				const FSimpleFontParameterValue NewValue{NewFont, NewFontPage};
+
+				ChangeInfo.FontParameterValueChanges.Add({ParameterName, OldValue, NewValue});
+			}
 		}
 	}
-	else if (Type == EMaterialParameterType::RuntimeVirtualTexture) {
-		URuntimeVirtualTexture* OldTexture = OldParams.RuntimeVirtualTextureValues[IndexOld];
-		URuntimeVirtualTexture* NewTexture = NewParams.RuntimeVirtualTextureValues[IndexNew];
+	else if (Type == EMaterialParameterType::RuntimeVirtualTexture)
+	{
+		if (IndexOld >= 0 && IndexOld < OldParams.RuntimeVirtualTextureValues.Num() && IndexNew >= 0 && IndexNew < NewParams.RuntimeVirtualTextureValues.Num())
+		{
+			URuntimeVirtualTexture *OldTexture = OldParams.RuntimeVirtualTextureValues[IndexOld];
+			URuntimeVirtualTexture *NewTexture = NewParams.RuntimeVirtualTextureValues[IndexNew];
 
-		if (OldTexture != NewTexture) {
-			ChangeInfo.VirtualTextureParameterValueChanges.Add({ParameterName, OldTexture, NewTexture});
-		}	
+			if (OldTexture != NewTexture)
+			{
+				ChangeInfo.VirtualTextureParameterValueChanges.Add({ParameterName, OldTexture, NewTexture});
+			}
+		}
 	}
 }
 
-FString ParameterInfoToString(const FMaterialParameterInfo& ParameterInfo) {
+FString ParameterInfoToString(const FMaterialParameterInfo &ParameterInfo)
+{
 	FString ResultString;
 
 	ResultString += ParameterInfo.Name.ToString();
 	ResultString.Append(TEXT(" ("));
 
-	UEnum* AssociationEnum = StaticEnum<EMaterialParameterAssociation>();
-	ResultString += AssociationEnum->GetNameByValue(ParameterInfo.Association).ToString();
+	UEnum *AssociationEnum = StaticEnum<EMaterialParameterAssociation>();
+	if (AssociationEnum)
+	{
+		ResultString += AssociationEnum->GetNameByValue(ParameterInfo.Association).ToString();
+	}
+	else
+	{
+		ResultString += TEXT("Unknown");
+	}
 
-	if (ParameterInfo.Index != INDEX_NONE) {
+	if (ParameterInfo.Index != INDEX_NONE)
+	{
 		ResultString.Append(TEXT(", Index = "));
 		ResultString.AppendInt(ParameterInfo.Index);
 	}
@@ -968,190 +1290,246 @@ FString ParameterInfoToString(const FMaterialParameterInfo& ParameterInfo) {
 	return ResultString;
 }
 
-void FMaterialLayoutChangeInfo::PrintChangeReport(TArray<FString>& OutReport) const {
-	if (RemovedMaterialParameters.Num()) {
+void FMaterialLayoutChangeInfo::PrintChangeReport(TArray<FString> &OutReport) const
+{
+	if (RemovedMaterialParameters.Num())
+	{
 		OutReport.Add(TEXT("Removed Material Parameters:"));
-		for (const FMaterialParameterInfo& ParameterInfo : RemovedMaterialParameters) {
+		for (const FMaterialParameterInfo &ParameterInfo : RemovedMaterialParameters)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s"), *ParameterInfoToString(ParameterInfo)));
 		}
 	}
-	
-	if (NewScalarParameters.Num()) {
+
+	if (NewScalarParameters.Num())
+	{
 		OutReport.Add(TEXT("New Scalar Parameters:"));
-		for (const TMaterialParameter<float>& Parameter : NewScalarParameters) {
+		for (const TMaterialParameter<float> &Parameter : NewScalarParameters)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s = %f"), *ParameterInfoToString(Parameter.ParameterInfo), Parameter.ParameterValue));
 		}
 	}
-	if (NewVectorParameters.Num()) {
+	if (NewVectorParameters.Num())
+	{
 		OutReport.Add(TEXT("New Vector Parameters:"));
-		for (const TMaterialParameter<FLinearColor>& Parameter : NewVectorParameters) {
+		for (const TMaterialParameter<FLinearColor> &Parameter : NewVectorParameters)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s = %s"), *ParameterInfoToString(Parameter.ParameterInfo), *Parameter.ParameterValue.ToString()));
 		}
 	}
-	if (NewTextureParameters.Num()) {
+	if (NewTextureParameters.Num())
+	{
 		OutReport.Add(TEXT("New Texture Parameters:"));
-		for (const TMaterialParameter<UTexture*>& Parameter : NewTextureParameters) {
-			OutReport.Add(FString::Printf(TEXT(" - %s = %s"), *ParameterInfoToString(Parameter.ParameterInfo), *Parameter.ParameterValue->GetPathName()));
+		for (const TMaterialParameter<UTexture *> &Parameter : NewTextureParameters)
+		{
+			FString TextureName = Parameter.ParameterValue ? Parameter.ParameterValue->GetPathName() : TEXT("None");
+			OutReport.Add(FString::Printf(TEXT(" - %s = %s"), *ParameterInfoToString(Parameter.ParameterInfo), *TextureName));
 		}
 	}
-	if (NewFontParameters.Num()) {
+	if (NewFontParameters.Num())
+	{
 		OutReport.Add(TEXT("New Font Parameters:"));
-		for (const TMaterialParameter<FSimpleFontParameterValue>& Parameter : NewFontParameters) {
+		for (const TMaterialParameter<FSimpleFontParameterValue> &Parameter : NewFontParameters)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s = %s"), *ParameterInfoToString(Parameter.ParameterInfo), *Parameter.ParameterValue.ToString()));
 		}
 	}
-	if (NewVirtualTextureParameters.Num()) {
+	if (NewVirtualTextureParameters.Num())
+	{
 		OutReport.Add(TEXT("New Runtime Virtual Texture Parameters:"));
-		for (const TMaterialParameter<URuntimeVirtualTexture*>& Parameter : NewVirtualTextureParameters) {
-			OutReport.Add(FString::Printf(TEXT(" - %s = %s"), *ParameterInfoToString(Parameter.ParameterInfo), *Parameter.ParameterValue->GetPathName()));
+		for (const TMaterialParameter<URuntimeVirtualTexture *> &Parameter : NewVirtualTextureParameters)
+		{
+			FString TextureName = Parameter.ParameterValue ? Parameter.ParameterValue->GetPathName() : TEXT("None");
+			OutReport.Add(FString::Printf(TEXT(" - %s = %s"), *ParameterInfoToString(Parameter.ParameterInfo), *TextureName));
 		}
 	}
 
-	if (ScalarParameterValueChanges.Num()) {
+	if (ScalarParameterValueChanges.Num())
+	{
 		OutReport.Add(TEXT("Scalar Parameter Value Changes:"));
-		for (const TParameterValueChange<float>& Parameter : ScalarParameterValueChanges) {
+		for (const TParameterValueChange<float> &Parameter : ScalarParameterValueChanges)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s: %f -> %f (Old -> New)"), *Parameter.ParameterName.ToString(), Parameter.OldValue, Parameter.NewValue));
 		}
 	}
-	if (VectorParameterValueChanges.Num()) {
+	if (VectorParameterValueChanges.Num())
+	{
 		OutReport.Add(TEXT("Vector Parameter Value Changes:"));
-		for (const TParameterValueChange<FLinearColor>& Parameter : VectorParameterValueChanges) {
+		for (const TParameterValueChange<FLinearColor> &Parameter : VectorParameterValueChanges)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s: %s -> %s (Old -> New)"), *Parameter.ParameterName.ToString(), *Parameter.OldValue.ToString(), *Parameter.NewValue.ToString()));
 		}
 	}
-	if (TextureParameterValueChanges.Num()) {
+	if (TextureParameterValueChanges.Num())
+	{
 		OutReport.Add(TEXT("Texture Parameter Value Changes:"));
-		for (const TParameterValueChange<UTexture*>& Parameter : TextureParameterValueChanges) {
-			OutReport.Add(FString::Printf(TEXT(" - %s: %s -> %s (Old -> New)"), *Parameter.ParameterName.ToString(), *Parameter.OldValue->GetPathName(), *Parameter.NewValue->GetPathName()));
+		for (const TParameterValueChange<UTexture *> &Parameter : TextureParameterValueChanges)
+		{
+			FString OldName = Parameter.OldValue ? Parameter.OldValue->GetPathName() : TEXT("None");
+			FString NewName = Parameter.NewValue ? Parameter.NewValue->GetPathName() : TEXT("None");
+			OutReport.Add(FString::Printf(TEXT(" - %s: %s -> %s (Old -> New)"), *Parameter.ParameterName.ToString(), *OldName, *NewName));
 		}
 	}
-	if (FontParameterValueChanges.Num()) {
+	if (FontParameterValueChanges.Num())
+	{
 		OutReport.Add(TEXT("Font Parameter Value Changes:"));
-		for (const TParameterValueChange<FSimpleFontParameterValue>& Parameter : FontParameterValueChanges) {
+		for (const TParameterValueChange<FSimpleFontParameterValue> &Parameter : FontParameterValueChanges)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s: %s -> %s (Old -> New)"), *Parameter.ParameterName.ToString(), *Parameter.OldValue.ToString(), *Parameter.NewValue.ToString()));
 		}
 	}
-	if (VirtualTextureParameterValueChanges.Num()) {
-		OutReport.Add(TEXT("Font Parameter Value Changes:"));
-		for (const TParameterValueChange<URuntimeVirtualTexture*>& Parameter : VirtualTextureParameterValueChanges) {
-			OutReport.Add(FString::Printf(TEXT(" - %s: %s -> %s (Old -> New)"), *Parameter.ParameterName.ToString(), *Parameter.OldValue->GetPathName(), *Parameter.NewValue->GetPathName()));
+	if (VirtualTextureParameterValueChanges.Num())
+	{
+		OutReport.Add(TEXT("Runtime Virtual Texture Parameter Value Changes:"));
+		for (const TParameterValueChange<URuntimeVirtualTexture *> &Parameter : VirtualTextureParameterValueChanges)
+		{
+			FString OldName = Parameter.OldValue ? Parameter.OldValue->GetPathName() : TEXT("None");
+			FString NewName = Parameter.NewValue ? Parameter.NewValue->GetPathName() : TEXT("None");
+			OutReport.Add(FString::Printf(TEXT(" - %s: %s -> %s (Old -> New)"), *Parameter.ParameterName.ToString(), *OldName, *NewName));
 		}
 	}
 
-	if (NewReferencedParameterCollections.Num()) {
+	if (NewReferencedParameterCollections.Num())
+	{
 		OutReport.Add(TEXT("New Referenced Parameter Collections:"));
-		for (UMaterialParameterCollection* ParameterCollection : NewReferencedParameterCollections) {
-			OutReport.Add(FString::Printf(TEXT(" - %s"), *ParameterCollection->GetPathName()));
+		for (UMaterialParameterCollection *ParameterCollection : NewReferencedParameterCollections)
+		{
+			FString CollectionName = ParameterCollection ? ParameterCollection->GetPathName() : TEXT("None");
+			OutReport.Add(FString::Printf(TEXT(" - %s"), *CollectionName));
 		}
 	}
-	if (RemovedParameterCollections.Num()) {
+	if (RemovedParameterCollections.Num())
+	{
 		OutReport.Add(TEXT("Parameter Collections No Longer Referenced:"));
-		for (UMaterialParameterCollection* ParameterCollection : RemovedParameterCollections) {
-			OutReport.Add(FString::Printf(TEXT(" - %s"), *ParameterCollection->GetPathName()));
+		for (UMaterialParameterCollection *ParameterCollection : RemovedParameterCollections)
+		{
+			FString CollectionName = ParameterCollection ? ParameterCollection->GetPathName() : TEXT("None");
+			OutReport.Add(FString::Printf(TEXT(" - %s"), *CollectionName));
 		}
 	}
 
-	if (bAddedQualityLevelNode) {
+	if (bAddedQualityLevelNode)
+	{
 		OutReport.Add(TEXT(" - Added Material Quality Switch"));
 	}
-	if (bRemovedQualityLevelNode) {
+	if (bRemovedQualityLevelNode)
+	{
 		OutReport.Add(TEXT(" - Removed Material Quality Switch"));
 	}
-	if (bAddedSceneColorExpression) {
+	if (bAddedSceneColorExpression)
+	{
 		OutReport.Add(TEXT(" - Added Scene Color Material Node"));
 	}
-	if (bRemovedSceneColorExpression) {
+	if (bRemovedSceneColorExpression)
+	{
 		OutReport.Add(TEXT(" - Removed Scene Color Material Node"));
 	}
-	if (bAddedVirtualTextureOutput) {
+	if (bAddedVirtualTextureOutput)
+	{
 		OutReport.Add(TEXT(" - Added Virtual Texture Output Node"));
 	}
-	if (bRemovedVirtualTextureOutput) {
+	if (bRemovedVirtualTextureOutput)
+	{
 		OutReport.Add(TEXT(" - Removed Virtual Texture Output Node"));
 	}
 
-	if (NewGrassTypes.Num()) {
+	if (NewGrassTypes.Num())
+	{
 		OutReport.Add("Grass Types Added:");
-		for (ULandscapeGrassType* GrassType : NewGrassTypes) {
+		for (ULandscapeGrassType *GrassType : NewGrassTypes)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s"), *GrassType->GetPathName()));
 		}
 	}
-	if (RemovedGrassTypes.Num()) {
+	if (RemovedGrassTypes.Num())
+	{
 		OutReport.Add("Grass Types Removed:");
-		for (ULandscapeGrassType* GrassType : RemovedGrassTypes) {
+		for (ULandscapeGrassType *GrassType : RemovedGrassTypes)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s"), *GrassType->GetPathName()));
 		}
 	}
 
-	if (NewDynamicParameters.Num()) {
+	if (NewDynamicParameters.Num())
+	{
 		OutReport.Add(TEXT("New Dynamic Parameters:"));
-		for (const FName& DynamicParameterName : NewDynamicParameters) {
+		for (const FName &DynamicParameterName : NewDynamicParameters)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s"), *DynamicParameterName.ToString()));
 		}
 	}
-	if (RemovedDynamicParameters.Num()) {
+	if (RemovedDynamicParameters.Num())
+	{
 		OutReport.Add(TEXT("Dynamic Parameters Removed:"));
-		for (const FName& DynamicParameterName : RemovedDynamicParameters) {
+		for (const FName &DynamicParameterName : RemovedDynamicParameters)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s"), *DynamicParameterName.ToString()));
 		}
 	}
 
-	if (NewReferencedTextures.Num()) {
+	if (NewReferencedTextures.Num())
+	{
 		OutReport.Add(TEXT("New Referenced Textures: "));
-		for (UTexture* Texture : NewReferencedTextures) {
+		for (UTexture *Texture : NewReferencedTextures)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s"), *Texture->GetPathName()));
 		}
 	}
-	if (NoLongerReferencedTextures.Num()) {
+	if (NoLongerReferencedTextures.Num())
+	{
 		OutReport.Add(TEXT("Textures No Longer Referenced: "));
-		for (UTexture* Texture : NoLongerReferencedTextures) {
+		for (UTexture *Texture : NoLongerReferencedTextures)
+		{
 			OutReport.Add(FString::Printf(TEXT(" - %s"), *Texture->GetPathName()));
 		}
 	}
 }
 
-bool FMaterialLayoutChangeInfo::IsParameterNodeRemoved(const FName& ParameterName) {
-	for (const FMaterialParameterInfo& ParameterInfo : RemovedMaterialParameters) {
-		if (ParameterInfo.Name == ParameterName && ParameterInfo.Association == GlobalParameter) {
+bool FMaterialLayoutChangeInfo::IsParameterNodeRemoved(const FName &ParameterName)
+{
+	for (const FMaterialParameterInfo &ParameterInfo : RemovedMaterialParameters)
+	{
+		if (ParameterInfo.Name == ParameterName && ParameterInfo.Association == GlobalParameter)
+		{
 			return true;
 		}
 	}
 	return false;
 }
 
-bool FMaterialLayoutChangeInfo::IsEmpty() const {
-	return  this->RemovedMaterialParameters.Num() == 0 &&
-			this->NewScalarParameters.Num() == 0 &&
-			this->NewVectorParameters.Num() == 0 &&
-			this->NewTextureParameters.Num() == 0 &&
-			this->NewFontParameters.Num() == 0 &&
-			this->NewVirtualTextureParameters.Num() == 0 &&
-				
-			this->ScalarParameterValueChanges.Num() == 0 &&
-			this->VectorParameterValueChanges.Num() == 0 &&
-			this->TextureParameterValueChanges.Num() == 0 &&
-			this->FontParameterValueChanges.Num() == 0 &&
-			this->VirtualTextureParameterValueChanges.Num() == 0 &&
+bool FMaterialLayoutChangeInfo::IsEmpty() const
+{
+	return this->RemovedMaterialParameters.Num() == 0 &&
+		   this->NewScalarParameters.Num() == 0 &&
+		   this->NewVectorParameters.Num() == 0 &&
+		   this->NewTextureParameters.Num() == 0 &&
+		   this->NewFontParameters.Num() == 0 &&
+		   this->NewVirtualTextureParameters.Num() == 0 &&
 
-			this->NewReferencedParameterCollections.Num() == 0 &&
-			this->RemovedParameterCollections.Num() == 0 &&
-				
-			this->bAddedQualityLevelNode == false &&
-			this->bRemovedQualityLevelNode == false &&
-				
-			this->bAddedSceneColorExpression == false &&
-			this->bRemovedSceneColorExpression == false &&
-				
-			this->bAddedVirtualTextureOutput == false &&
-			this->bRemovedVirtualTextureOutput == false &&
+		   this->ScalarParameterValueChanges.Num() == 0 &&
+		   this->VectorParameterValueChanges.Num() == 0 &&
+		   this->TextureParameterValueChanges.Num() == 0 &&
+		   this->FontParameterValueChanges.Num() == 0 &&
+		   this->VirtualTextureParameterValueChanges.Num() == 0 &&
 
-			this->NewGrassTypes.Num() == 0 &&
-			this->RemovedGrassTypes.Num() == 0 &&
-				
-			this->NewDynamicParameters.Num() == 0 &&
-			this->RemovedDynamicParameters.Num() == 0 &&
+		   this->NewReferencedParameterCollections.Num() == 0 &&
+		   this->RemovedParameterCollections.Num() == 0 &&
 
-			this->NewReferencedTextures.Num() == 0 &&
-			this->NoLongerReferencedTextures.Num() == 0;
+		   this->bAddedQualityLevelNode == false &&
+		   this->bRemovedQualityLevelNode == false &&
+
+		   this->bAddedSceneColorExpression == false &&
+		   this->bRemovedSceneColorExpression == false &&
+
+		   this->bAddedVirtualTextureOutput == false &&
+		   this->bRemovedVirtualTextureOutput == false &&
+
+		   this->NewGrassTypes.Num() == 0 &&
+		   this->RemovedGrassTypes.Num() == 0 &&
+
+		   this->NewDynamicParameters.Num() == 0 &&
+		   this->RemovedDynamicParameters.Num() == 0 &&
+
+		   this->NewReferencedTextures.Num() == 0 &&
+		   this->NoLongerReferencedTextures.Num() == 0;
 }
-
